@@ -47,7 +47,17 @@ def build_ticket_draft(state: ConversationState) -> str:
 def _format_context(docs: List[Dict[str, str]]) -> str:
     parts = []
     for idx, doc in enumerate(docs, start=1):
-        parts.append(f"Source {idx}: {doc['source']}\n{doc['content']}")
+        source = doc['source']
+        title = doc.get('title', source)
+        content = doc['content']
+        
+        # Format source info with URL if available
+        if source.startswith('http'):
+            source_line = f"Source {idx}: {title} ({source})"
+        else:
+            source_line = f"Source {idx}: {title}"
+        
+        parts.append(f"{source_line}\n{content}")
     return "\n\n".join(parts)
 
 

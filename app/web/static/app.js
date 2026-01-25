@@ -20,11 +20,29 @@ let audioQueue = [];
 let isPlayingQueue = false;
 let currentAssistantMessageDiv = null;
 let currentAssistantBubble = null;
+let currentAssistantRawText = "";
 
 const TARGET_SAMPLE_RATE = 16000;
 
 function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function linkifyText(text) {
+    if (!text) return "";
+    // Convert URLs in text to clickable links
+    // Match http(s) URLs, handling URLs that may end with / or be followed by punctuation
+    const urlRegex = /https?:\/\/[^\s<>"\)]+/g;
+    return text.replace(urlRegex, (url) => {
+        // Remove trailing punctuation that's not part of URL
+        let cleanUrl = url;
+        let trailingPunct = '';
+        while (cleanUrl.length > 0 && /[.,;:!?\)]/.test(cleanUrl[cleanUrl.length - 1])) {
+            trailingPunct = cleanUrl[cleanUrl.length - 1] + trailingPunct;
+            cleanUrl = cleanUrl.slice(0, -1);
+        }
+        return `<a href="${cleanUrl}" target="_blank" class="inline-link">${cleanUrl}</a>${trailingPunct}`;
+    });
 }
 
 function createMessage(role, content = "") {
@@ -33,7 +51,12 @@ function createMessage(role, content = "") {
     
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = content;
+    if (role === "assistant") {
+        currentAssistantRawText = content;
+        bubble.innerHTML = linkifyText(content);
+    } else {
+        bubble.textContent = content;
+    }
     
     msgDiv.appendChild(bubble);
     messagesEl.appendChild(msgDiv);
@@ -46,8 +69,11 @@ function appendToAssistantMessage(text) {
         const { bubble, msgDiv } = createMessage("assistant");
         currentAssistantBubble = bubble;
         currentAssistantMessageDiv = msgDiv;
+        currentAssistantRawText = "";
     }
-    currentAssistantBubble.textContent += text;
+    
+    currentAssistantRawText += text;
+    currentAssistantBubble.innerHTML = linkifyText(currentAssistantRawText);
     scrollToBottom();
 }
 

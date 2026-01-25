@@ -134,6 +134,8 @@ main {
 .source-item:last-child { margin-bottom: 0; }
 .source-link { color: #007aff; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
+.inline-link { color: #007aff; text-decoration: none; }
+.inline-link:hover { text-decoration: underline; }
 
 #input-area {
     padding: 1.5rem 2rem;
