@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ITS Voice RAG Bot PoC</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>ITS Voice RAG Bot PoC</h1>
+      <p>Public-docs-only, local voice-first demo.</p>
+    </header>
+
+    <section class="controls">
+      <button id="startBtn">Start Listening</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <input id="textInput" placeholder="Type a question (optional)" />
+      <button id="sendBtn">Send Text</button>
+    </section>
+
+    <section class="status">
+      <div>Connection: <span id="connection">disconnected</span></div>
+      <div>Listening: <span id="listening">off</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Conversation</h2>
+      <div id="log" class="log"></div>
+      <div id="partial" class="partial-text"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Sources</h2>
+      <div id="sources" class="sources"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

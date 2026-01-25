@@ -1,41 +1,60 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ITS Voice RAG Bot PoC</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ITS AI Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <main class="container">
     <header>
-      <h1>ITS Voice RAG Bot PoC</h1>
-      <p>Public-docs-only, local voice-first demo.</p>
+        <h1>ITS Support Assistant</h1>
+        <div class="controls">
+            <div class="toggle-group">
+                <span class="control-label">Voice Output</span>
+                <label class="switch">
+                    <input type="checkbox" id="audioToggle" checked>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="status-indicator">
+                <span id="connection-dot" class="status-dot"></span>
+                <span id="connection-status">Disconnected</span>
+            </div>
+        </div>
     </header>
 
-    <section class="controls">
-      <button id="startBtn">Start Listening</button>
-      <button id="stopBtn" disabled>Stop</button>
-      <input id="textInput" placeholder="Type a question (optional)" />
-      <button id="sendBtn">Send Text</button>
-    </section>
+    <main>
+        <div id="chat-container">
+            <div id="messages">
+                <!-- Messages will appear here -->
+                <div class="message assistant">
+                    <div class="bubble">
+                        Hello! I'm your ITS assistant. How can I help you today?
+                    </div>
+                </div>
+            </div>
+            
+            <div id="input-area">
+                <div id="partial-transcript" style="position: absolute; bottom: 80px; left: 0; right: 0; text-align: center; color: #666; pointer-events: none; padding: 0 2rem;"></div>
+                
+                <input type="text" id="textInput" placeholder="Type a message or click microphone..." autocomplete="off">
+                
+                <button id="sendBtn" title="Send (Enter)">
+                    <svg class="icon icon-send" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+                
+                <button id="startBtn" title="Start Voice">
+                    <svg class="icon icon-mic" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.44 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                </button>
+                
+                <button id="stopBtn" title="Stop Voice" disabled>
+                    <svg class="icon icon-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                </button>
+            </div>
+        </div>
+    </main>
 
-    <section class="status">
-      <div>Connection: <span id="connection">disconnected</span></div>
-      <div>Listening: <span id="listening">off</span></div>
-    </section>
-
-    <section class="panel">
-      <h2>Conversation</h2>
-      <div id="log" class="log"></div>
-    </section>
-
-    <section class="panel">
-      <h2>Sources</h2>
-      <div id="sources" class="sources"></div>
-    </section>
-  </main>
-
-  <script src="/static/app.js"></script>
+    <script src="/static/app.js"></script>
 </body>
 </html>

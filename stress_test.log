@@ -1,0 +1,73 @@
+Loading RAG Retriever...
+Retriever loaded.
+Starting stress test with 20 questions...
+Processing (1/20): How do I connect to the VPN?
+  -> Returned 3 sources in 9.28s
+Processing (2/20): I forgot my password, how do I reset it?
+  -> Returned 5 sources in 5.29s
+Processing (3/20): How do I set up MFA on my phone?
+  -> Returned 5 sources in 6.43s
+Processing (4/20): What is the WiFi password for the guest network?
+  -> Returned 5 sources in 4.45s
+Processing (5/20): I can't access my email.
+  -> Returned 5 sources in 9.98s
+Processing (6/20): How do I install Office 365?
+  -> Returned 5 sources in 10.04s
+Processing (7/20): Where can I find the help desk?
+  -> Returned 5 sources in 2.74s
+Processing (8/20): My computer is slow.
+  -> Returned 0 sources in 0.50s
+Processing (9/20): How do I print from my laptop?
+  -> Returned 5 sources in 9.52s
+Processing (10/20): What is the URL for Sakai?
+  -> Returned 5 sources in 5.03s
+Processing (11/20): How do I access Zoom?
+  -> Returned 5 sources in 6.42s
+Processing (12/20): Can I get Adobe Creative Cloud?
+  -> Returned 5 sources in 7.43s
+Processing (13/20): How do I report a phishing email?
+  -> Returned 5 sources in 2.75s
+Processing (14/20): My internet is not working.
+  -> Returned 1 sources in 1.30s
+Processing (15/20): How do I connect to the eduroam wifi?
+  -> Returned 5 sources in 6.49s
+Processing (16/20): What software is available for students?
+  -> Returned 5 sources in 6.40s
+Processing (17/20): How do I submit a ticket?
+  -> Returned 0 sources in 0.00s
+Processing (18/20): My account is locked.
+  -> Returned 5 sources in 3.38s
+Processing (19/20): How do I change my MFA settings?
+  -> Returned 5 sources in 2.26s
+Processing (20/20): Is there a VPN for Linux?
+  -> Returned 0 sources in 0.05s
+
+================================================================================
+#   | Query                                    | Intent       | Srcs | Time   | Response Preview
+================================================================================
+1   | How do I connect to the VPN?             | troubleshoot | 3    | 9.28s | To connect to the VPN, I need more information about which specific VPN you are referring to (e.g., ...
+2   | I forgot my password, how do I reset it? | troubleshoot | 5    | 5.29s | To reset your password, follow these steps:  1. Visit the Microsoft Self-Service Password Reset page...
+3   | How do I set up MFA on my phone?         | troubleshoot | 5    | 6.43s | Based on the provided context, I do not see specific instructions for setting up MFA on a phone in g...
+4   | What is the WiFi password for the guest  | troubleshoot | 5    | 4.45s | I do not know the WiFi password for the guest network. However, I can suggest that you try registeri...
+5   | I can't access my email.                 | troubleshoot | 5    | 9.98s | I'd be happy to help troubleshoot your email access issue.  To start, let's check if the issue is re...
+6   | How do I install Office 365?             | troubleshoot | 5    | 10.04s | To install Office 365, follow these steps:  **For Windows Devices:**  1. Click on the Windows Start ...
+7   | Where can I find the help desk?          | troubleshoot | 5    | 2.74s | Based on the provided context, I do not see any information about the location of the help desk. How...
+8   | My computer is slow.                     | unknown      | 0    | 0.50s | I don't have a public source for that yet. Please contact the ITS Service Desk or provide more detai...
+9   | How do I print from my laptop?           | troubleshoot | 5    | 9.52s | To print from your laptop, you need to follow these steps:  1. Ensure that your laptop is connected ...
+10  | What is the URL for Sakai?               | troubleshoot | 5    | 5.03s | I do not know the URL for Sakai from the provided context. However, you can find instructions on how...
+11  | How do I access Zoom?                    | troubleshoot | 5    | 6.42s | To access Zoom:  1. Download the client from https://luc.zoom.us/download. 2. Open it up and select ...
+12  | Can I get Adobe Creative Cloud?          | troubleshoot | 5    | 7.43s | Based on the provided context, it appears that Adobe Creative Cloud is available to Loyola students ...
+13  | How do I report a phishing email?        | troubleshoot | 5    | 2.75s | To report a phishing email, forward it to ITSServiceDesk@luc.edu for further investigation....
+14  | My internet is not working.              | troubleshoot | 1    | 1.30s | I don't know how to troubleshoot internet connectivity issues. I suggest contacting the ITS Service ...
+15  | How do I connect to the eduroam wifi?    | troubleshoot | 5    | 6.49s | To connect to the eduroam wifi:  1. Go to your device's Wi-Fi settings. 2. Select "Eduroam" from the...
+16  | What software is available for students? | troubleshoot | 5    | 6.40s | Based on the provided sources, here are the software available to students:  1. Microsoft Office (pa...
+17  | How do I submit a ticket?                | ticket_draft | 0    | 0.00s | Ticket Draft (not submitted) Issue: How do I submit a ticket? Environment: Unknown Attempted Steps: ...
+18  | My account is locked.                    | troubleshoot | 5    | 3.38s | I don't see any information on how to unlock an account in the provided context. However, I can sugg...
+19  | How do I change my MFA settings?         | troubleshoot | 5    | 2.26s | To change your MFA settings, please visit LUC MFA Preferences (Source 2)....
+20  | Is there a VPN for Linux?                | unknown      | 0    | 0.05s | I don't have a public source for that yet. Please contact the ITS Service Desk or provide more detai...
+================================================================================
+Total Questions: 20
+Successful:      20
+Failed:          0
+Avg Latency:     4.99s
+================================================================================
