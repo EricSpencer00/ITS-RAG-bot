@@ -66,8 +66,21 @@ function renderSources(sources) {
     sources.forEach((src) => {
         const div = document.createElement("div");
         div.className = "source-item";
-        div.textContent = `${src.title || "Document"} (${src.score})`;
-        div.title = src.source;
+        
+        // Check if source is a URL
+        const sourceUrl = src.source || "";
+        if (sourceUrl.startsWith("http")) {
+            const link = document.createElement("a");
+            link.href = sourceUrl;
+            link.target = "_blank";
+            link.className = "source-link";
+            link.textContent = src.title || sourceUrl;
+            div.appendChild(link);
+            div.appendChild(document.createTextNode(` (${src.score})`));
+        } else {
+            div.textContent = `${src.title || "Document"} (${src.score})`;
+            div.title = sourceUrl;
+        }
         sourcesDiv.appendChild(div);
     });
     scrollToBottom();

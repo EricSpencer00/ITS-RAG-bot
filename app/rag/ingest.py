@@ -162,6 +162,65 @@ def _discover_kb_articles(search_url: str, max_pages: int = 40) -> List[str]:
     return list(discovered)
 
 
+def _crawl_luc_its_site(base_url: str = "https://www.luc.edu/its/", max_pages: int = 200) -> List[tuple[str, str, str]]:
+    """
+    Crawl the main LUC ITS website for documentation pages.
+    """
+    visited = set()
+    to_visit = {base_url}
+    results = []
+    
+    print(f"\nCrawling LUC ITS site starting from {base_url}...")
+    
+    while to_visit and len(visited) < max_pages:
+        url = to_visit.pop()
+        if url in visited:
+            continue
+        
+        # Only crawl pages under /its/
+        parsed = urlparse(url)
+        if not parsed.path.startswith("/its"):
+            continue
+        
+        visited.add(url)
+        
+        html = _fetch_page(url)
+        if not html:
+            continue
+        
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # Get title
+        title = ""
+        title_el = soup.find("h1") or soup.find("title")
+        if title_el:
+            title = title_el.get_text().strip()
+        
+        # Extract text
+        text = _extract_text(html, url)
+        if text and len(text) > 100:
+            results.append((url, title, text))
+        
+        # Find more links on this page
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            if href.startswith("/its"):
+                full_url = urljoin("https://www.luc.edu", href)
+                if full_url not in visited:
+                    to_visit.add(full_url)
+            elif href.startswith("https://www.luc.edu/its"):
+                if href not in visited:
+                    to_visit.add(href)
+        
+        time.sleep(0.2)
+        
+        if len(visited) % 20 == 0:
+            print(f"  Crawled {len(visited)} pages, found {len(results)} with content...")
+    
+    print(f"Crawled {len(visited)} pages from luc.edu/its, extracted {len(results)} documents")
+    return results
+
+
 def _fetch_kb_article(url: str) -> tuple[str, str, str] | None:
     """Fetch and extract content from a KB article."""
     html = _fetch_page(url)
@@ -239,9 +298,19 @@ def ingest() -> None:
             docs_added += 1
         time.sleep(0.3)  # Be polite to server
 
-    # 3. Also fetch any additional seed URLs
+    # 3. Crawl the main LUC ITS website
+    its_pages = _crawl_luc_its_site("https://www.luc.edu/its/")
+    print(f"\nProcessing {len(its_pages)} pages from luc.edu/its...")
+    for source, title, text in tqdm(its_pages, desc="LUC ITS Pages"):
+        chunks = _chunk_text(text)
+        for chunk in chunks:
+            embeddings_list.append(chunk)
+            metadata.append({"content": chunk, "source": source, "title": title or source})
+            docs_added += 1
+
+    # 4. Also fetch any additional seed URLs
     seed_urls = _load_seed_urls(raw_path / "seed_urls.txt")
-    additional_urls = [u for u in seed_urls if "/KB/" not in u]  # Skip KB URLs already handled
+    additional_urls = [u for u in seed_urls if "/KB/" not in u and "luc.edu/its" not in u]
     
     for url in tqdm(additional_urls, desc="Additional URLs"):
         html = _fetch_page(url)
@@ -256,7 +325,7 @@ def ingest() -> None:
             metadata.append({"content": chunk, "source": url, "title": url})
             docs_added += 1
 
-    # 4. Encode and save
+    # 5. Encode and save
     if embeddings_list:
         print(f"\nEncoding {len(embeddings_list)} chunks...")
         embeddings = embedder.encode(embeddings_list, normalize_embeddings=True, show_progress_bar=True)
@@ -272,5 +341,4 @@ def ingest() -> None:
 
 
 if __name__ == "__main__":
-    ingest()
     ingest()

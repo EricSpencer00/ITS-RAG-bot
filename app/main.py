@@ -178,9 +178,3 @@ async def ws_audio(websocket: WebSocket) -> None:
             if result["final"] and text:
                 await process_response_stream(text)
 
-        if msg_type == "text":
-            text = payload.get("text", "").strip()
-            if not text:
-                continue
-            await process_response_stream(text)
-
