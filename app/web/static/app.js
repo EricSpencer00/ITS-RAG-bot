@@ -1,0 +1,217 @@
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const sendBtn = document.getElementById("sendBtn");
+const textInput = document.getElementById("textInput");
+const logEl = document.getElementById("log");
+const sourcesEl = document.getElementById("sources");
+const connectionEl = document.getElementById("connection");
+const listeningEl = document.getElementById("listening");
+
+let ws = null;
+let audioContext = null;
+let processor = null;
+let input = null;
+let stream = null;
+let isListening = false;
+let isSpeaking = false;
+let currentAudio = null;
+
+const TARGET_SAMPLE_RATE = 16000;
+
+function logMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = `log-item ${role}`;
+  div.textContent = `${role.toUpperCase()}: ${text}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderSources(sources) {
+  sourcesEl.innerHTML = "";
+  if (!sources || sources.length === 0) {
+    sourcesEl.textContent = "No sources.";
+    return;
+  }
+  sources.forEach((src) => {
+    const div = document.createElement("div");
+    div.className = "source";
+    div.textContent = `${src.title || "source"} (${src.score})\n${src.source}`;
+    sourcesEl.appendChild(div);
+  });
+}
+
+function setConnection(connected) {
+  connectionEl.textContent = connected ? "connected" : "disconnected";
+}
+
+function setListening(listening) {
+  listeningEl.textContent = listening ? "on" : "off";
+}
+
+function stopPlayback() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = "";
+    currentAudio = null;
+  }
+  isSpeaking = false;
+}
+
+async function playAudio(base64Audio) {
+  stopPlayback();
+  const binary = atob(base64Audio);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes.buffer], { type: "audio/wav" });
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  isSpeaking = true;
+  audio.onended = () => {
+    isSpeaking = false;
+    URL.revokeObjectURL(url);
+  };
+  audio.play();
+}
+
+function resampleTo16k(float32Array, inputSampleRate) {
+  if (inputSampleRate === TARGET_SAMPLE_RATE) {
+    return float32Array;
+  }
+  const ratio = inputSampleRate / TARGET_SAMPLE_RATE;
+  const newLength = Math.round(float32Array.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < float32Array.length; i++) {
+      accum += float32Array[i];
+      count++;
+    }
+    result[offsetResult] = accum / count;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function floatTo16BitPCM(float32Array) {
+  const buffer = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buffer);
+  let offset = 0;
+  for (let i = 0; i < float32Array.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
+}
+
+function computeRms(float32Array) {
+  let sum = 0;
+  for (let i = 0; i < float32Array.length; i++) {
+    sum += float32Array[i] * float32Array[i];
+  }
+  return Math.sqrt(sum / float32Array.length);
+}
+
+async function startListening() {
+  if (isListening) return;
+  ws = new WebSocket(`ws://${location.host}/ws/audio`);
+
+  ws.onopen = () => {
+    setConnection(true);
+  };
+
+  ws.onclose = () => {
+    setConnection(false);
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "partial") {
+      // no-op
+    }
+    if (msg.type === "final_text") {
+      logMessage("user", msg.text);
+    }
+    if (msg.type === "final") {
+      logMessage("assistant", msg.response);
+      renderSources(msg.sources);
+    }
+    if (msg.type === "tts") {
+      playAudio(msg.audio);
+    }
+    if (msg.type === "barge_in") {
+      stopPlayback();
+    }
+  };
+
+  audioContext = new AudioContext();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  input = audioContext.createMediaStreamSource(stream);
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  processor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const inputData = e.inputBuffer.getChannelData(0);
+    const rms = computeRms(inputData);
+    if (isSpeaking && rms > 0.02) {
+      ws.send(JSON.stringify({ type: "barge_in" }));
+      stopPlayback();
+    }
+    const resampled = resampleTo16k(inputData, audioContext.sampleRate);
+    const pcmBuffer = floatTo16BitPCM(resampled);
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer)));
+    ws.send(JSON.stringify({ type: "audio", data: b64, sample_rate: TARGET_SAMPLE_RATE }));
+  };
+
+  input.connect(processor);
+  processor.connect(audioContext.destination);
+  isListening = true;
+  setListening(true);
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+}
+
+async function stopListening() {
+  if (!isListening) return;
+  if (processor) {
+    processor.disconnect();
+    processor = null;
+  }
+  if (input) {
+    input.disconnect();
+    input = null;
+  }
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  if (audioContext) {
+    await audioContext.close();
+    audioContext = null;
+  }
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  isListening = false;
+  setListening(false);
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+}
+
+sendBtn.addEventListener("click", () => {
+  const text = textInput.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "text", text }));
+  textInput.value = "";
+});
+
+startBtn.addEventListener("click", startListening);
+stopBtn.addEventListener("click", stopListening);

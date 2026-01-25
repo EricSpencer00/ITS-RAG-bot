@@ -1,0 +1,14 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+pydantic>=2.8.0
+python-dotenv>=1.0.0
+faiss-cpu>=1.8.0
+sentence-transformers>=3.0.0
+soundfile>=0.12.1
+vosk>=0.3.44
+pyttsx3>=2.90
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+trafilatura>=1.12.0
+tqdm>=4.66.0

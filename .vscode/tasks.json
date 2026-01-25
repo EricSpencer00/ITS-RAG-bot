@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run ITS Voice RAG Server",
+			"type": "shell",
+			"command": "source .venv/bin/activate && python scripts/run_dev.py",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
