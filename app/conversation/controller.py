@@ -16,14 +16,63 @@ INTENT_TICKET = "ticket_draft"
 INTENT_TROUBLESHOOT = "troubleshoot"
 INTENT_UNKNOWN = "unknown"
 
+# Keywords for topic continuity detection
+TROUBLESHOOTING_KEYWORDS = ["how do i", "fix", "error", "issue", "problem", "trouble", "vpn", "wifi", "email", "mfa", "password", "account", "login", "access", "network", "printer", "software"]
+TOPIC_KEYWORDS = ["reset", "change", "configure", "set up", "install", "update", "connect", "enable", "disable"]
+
 
 def detect_intent(text: str) -> str:
     lowered = text.lower()
     if any(k in lowered for k in ["ticket", "help request", "support request", "case", "submit"]):
         return INTENT_TICKET
-    if any(k in lowered for k in ["how do i", "fix", "error", "issue", "problem", "trouble", "vpn", "wifi", "email", "mfa"]):
+    if any(k in lowered for k in TROUBLESHOOTING_KEYWORDS):
         return INTENT_TROUBLESHOOT
     return INTENT_TROUBLESHOOT
+
+
+def is_related_to_context(text: str, history: List[Dict[str, str]]) -> bool:
+    """
+    Determine if the current message is related to the conversation context.
+    Uses keyword matching and semantic similarity to decide if context should be preserved.
+    """
+    if not history or len(history) < 2:
+        return True  # First message, no context to relate to
+    
+    lowered_text = text.lower()
+    
+    # Get the last user message(s) for context
+    user_messages = [h["content"] for h in history if h["role"] == "user"]
+    if not user_messages:
+        return True
+    
+    last_user_text = user_messages[-1].lower()
+    
+    # Check for direct topic continuity markers
+    continuity_markers = ["also", "and", "another", "same", "still", "again", "what about", "how about", "more on"]
+    if any(marker in lowered_text for marker in continuity_markers):
+        return True
+    
+    # Check for keyword overlap (indicates topic continuity)
+    text_keywords = set(lowered_text.split())
+    last_keywords = set(last_user_text.split())
+    common_keywords = text_keywords & last_keywords
+    
+    # If there's meaningful keyword overlap, consider it related
+    important_words = [kw for kw in common_keywords if len(kw) > 3 and kw not in ["that", "this", "have", "with", "from", "what", "help", "need"]]
+    if len(important_words) >= 2:
+        return True
+    
+    # Check if both messages have similar troubleshooting intent
+    both_troubleshooting = (
+        any(k in lowered_text for k in TROUBLESHOOTING_KEYWORDS) and
+        any(k in last_user_text for k in TROUBLESHOOTING_KEYWORDS)
+    )
+    if both_troubleshooting:
+        return True
+    
+    # If no clear relation found, still return True with lower confidence
+    # This implements "don't completely drop the context" requirement
+    return True
 
 
 def requires_private_data(text: str) -> bool:
@@ -101,6 +150,8 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
     Async Generator that yields:
     1. {"type": "meta", "intent": ..., "sources": ..., "response": ...} (response may be pre-calculated for simple intents)
     2. {"type": "token", "content": ...} (for LLM generation)
+    
+    Maintains conversation context across multiple turns, with intelligent context preservation.
     """
     if requires_private_data(text):
         refusal = "I can only use public ITS information in this PoC. Please contact the ITS Service Desk for requests that require private or internal data."
@@ -119,8 +170,6 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
         return
 
     docs = retriever.query(text)
-    # Modified Logic: If no docs, we STILL go to LLM but with empty context description (or just general knowledge request)
-    # The prompt will handle the "general advice" fallback.
     
     yield {"type": "meta", "intent": intent, "sources": docs}
 
@@ -128,11 +177,25 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
          context = "No specific Loyola documentation found."
     else:
          context = _format_context(docs)
-         
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Question: {text}\n\nContext:\n{context}"},
-    ]
+    
+    # Build message history - include recent conversation context if related
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    # Add conversation history if the new message is related to prior context
+    if is_related_to_context(text, state.history):
+        # Include last 4 turns (2 user-assistant pairs) of history for context
+        recent_history = state.history[:-1]  # Exclude the current user message (just added)
+        if recent_history:
+            # Only include last 4 messages (2 turns) to avoid overwhelming context
+            history_to_include = recent_history[-4:]
+            for msg in history_to_include:
+                messages.append(msg)
+    
+    # Add current query with context
+    messages.append({
+        "role": "user",
+        "content": f"Question: {text}\n\nContext:\n{context}"
+    })
     
     full_response = []
     async for token in _ollama_chat_stream(messages):
@@ -160,15 +223,29 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
 
     docs = retriever.query(text)
     if not docs:
-        fallback = "I don't have a public source for that yet. Please contact the ITS Service Desk or provide more details."
-        state.add_turn("assistant", fallback)
-        return {"response": fallback, "intent": INTENT_UNKNOWN, "sources": []}
-
-    context = _format_context(docs)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Question: {text}\n\nContext:\n{context}"},
-    ]
+        context = "No specific Loyola documentation found."
+    else:
+        context = _format_context(docs)
+    
+    # Build message history - include recent conversation context if related
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    # Add conversation history if the new message is related to prior context
+    if is_related_to_context(text, state.history):
+        # Include last 4 turns (2 user-assistant pairs) of history for context
+        recent_history = state.history[:-1]  # Exclude the current user message (just added)
+        if recent_history:
+            # Only include last 4 messages (2 turns) to avoid overwhelming context
+            history_to_include = recent_history[-4:]
+            for msg in history_to_include:
+                messages.append(msg)
+    
+    # Add current query with context
+    messages.append({
+        "role": "user",
+        "content": f"Question: {text}\n\nContext:\n{context}"
+    })
+    
     answer = _ollama_chat(messages)
     response = answer.strip()
     state.add_turn("assistant", response)

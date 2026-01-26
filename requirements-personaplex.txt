@@ -1,0 +1,30 @@
+# ITS Voice RAG Bot - PersonaPlex Edition
+# Core dependencies for NVIDIA PersonaPlex speech-to-speech model
+
+# Web Framework
+fastapi>=0.128.0
+uvicorn>=0.40.0
+aiohttp>=3.10.5,<3.14
+websockets>=16.0
+
+# PersonaPlex / Moshi dependencies
+torch>=2.2.0
+numpy>=1.26,<2.5
+safetensors>=0.4.0,<0.8
+huggingface-hub>=0.24,<0.40
+einops>=0.7,<0.9
+sentencepiece>=0.2,<0.3
+sphn>=0.1.4,<0.2
+
+# RAG components (kept from original)
+sentence-transformers>=5.2.0
+faiss-cpu>=1.13.0
+trafilatura>=2.0.0
+beautifulsoup4>=4.14.0
+requests>=2.32.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+tqdm>=4.60.0
+PyYAML>=6.0.0

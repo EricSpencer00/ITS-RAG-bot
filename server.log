@@ -1,0 +1,32 @@
+Generated self-signed certificate in /var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tmpqk0tefem
+Initializing PersonaPlex engine... (this may take a few moments)
+[PersonaPlex] Loading Mimi speech codec...
+[PersonaPlex] Loading text tokenizer...
+[PersonaPlex] Loading voice prompts...
+[PersonaPlex] Voice prompts directory: /Users/eric/.cache/huggingface/hub/models--nvidia--personaplex-7b-v1/snapshots/f69e74f60b25bded21b08fd932c334e47e28f184/voices
+[PersonaPlex] Found 18 voice prompts
+[PersonaPlex] Loading PersonaPlex LM (this may take a while)...
+[PersonaPlex] Warming up model...
+[PersonaPlex] Ready for conversations!
+Engine initialized.
+
+============================================================
+ITS Voice RAG Bot - PersonaPlex Edition
+============================================================
+Access the Web UI at: https://10.0.0.106:8998
+============================================================
+
+Traceback (most recent call last):
+  File "/Users/eric/GitHub/live-bot-its/scripts/run_dev.py", line 16, in <module>
+    run_server()
+    ~~~~~~~~~~^^
+  File "/Users/eric/GitHub/live-bot-its/app/main.py", line 496, in run_server
+    web.run_app(aiohttp_app, host=args.host, port=args.port, ssl_context=ssl_context)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/eric/GitHub/live-bot-its/.venv/lib/python3.14/site-packages/aiohttp/web.py", line 526, in run_app
+    loop.run_until_complete(main_task)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+OSError: [Errno 48] error while attempting to bind on address ('0.0.0.0', 8998): [errno 48] address already in use
