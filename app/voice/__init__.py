@@ -1,16 +1,13 @@
 """
-Voice module - PersonaPlex full-duplex speech-to-speech
+Voice module — Cascaded STT/TTS pipeline
 
-This module provides real-time conversational AI using NVIDIA PersonaPlex.
+STT: faster-whisper (CTranslate2)
+TTS: Edge TTS (Microsoft neural voices)
 """
-from app.voice.personaplex import (
-    PersonaPlexEngine,
-    PersonaPlexSession,
-    get_engine,
-)
+from app.voice.stt_whisper import WhisperSTT
+from app.voice.tts_edge import EdgeTTS
 
 __all__ = [
-    "PersonaPlexEngine",
-    "PersonaPlexSession",
-    "get_engine",
+    "WhisperSTT",
+    "EdgeTTS",
 ]
