@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import base64
 import json
-import uuid
 import re
+import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.config import STT_SILENCE_CHUNKS, TTS_CHUNK_MIN_CHARS
 from app.conversation.controller import handle_user_text_stream
 from app.conversation.state import ConversationState
 from app.rag.retriever import Retriever
@@ -26,8 +27,9 @@ app = FastAPI(title="ITS Voice RAG Bot")
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
 
-# ── Shared singleton STT model (heavy, load once) ──────────────────────
+# ── Singletons (load once at startup, shared across all sessions) ──────
 _stt: WhisperSTT | None = None
+_retriever: Retriever | None = None
 
 
 def get_stt() -> WhisperSTT:
@@ -37,10 +39,20 @@ def get_stt() -> WhisperSTT:
     return _stt
 
 
+def get_retriever() -> Retriever:
+    global _retriever
+    if _retriever is None:
+        print("[Server] Loading RAG retriever + embeddings...")
+        _retriever = Retriever()
+        print("[Server] RAG retriever ready.")
+    return _retriever
+
+
 @app.on_event("startup")
 async def startup() -> None:
-    """Pre-load the Whisper model at startup so first request isn't slow."""
+    """Pre-load heavy models at startup so first request has no latency."""
     get_stt()
+    get_retriever()
     print("[Server] ITS Voice RAG Bot ready at http://127.0.0.1:8000")
 
 
@@ -55,10 +67,51 @@ async def health():
     return {"status": "ok", "stt": "whisper", "tts": "edge-tts"}
 
 
+# ── Helpers ────────────────────────────────────────────────────────────
+
+# Splits on sentence end (.!?) or hard comma-clause (,  at 60+ chars)
+_tts_break_re = re.compile(r'(?<=[.!?])\s+|(?<=,)\s+')
+
+_url_re = re.compile(r'https?://\S+')
+
+
+def _strip_urls(text: str) -> str:
+    """Remove raw URLs before TTS — they can't be spoken sensibly."""
+    return _url_re.sub('', text).strip()
+
+
+def _should_flush_tts(buffer: str) -> tuple[str, str] | None:
+    """Return (to_speak, remainder) if buffer has a good TTS break point,
+    or None if we should keep accumulating.
+
+    Strategy:
+    - Wait until buffer has TTS_CHUNK_MIN_CHARS characters
+    - Then split on the nearest sentence end (.!?) first
+    - Fall back to comma-break
+    - Force-flush at 3x TTS_CHUNK_MIN_CHARS regardless
+    """
+    if len(buffer) < TTS_CHUNK_MIN_CHARS:
+        return None
+
+    # Try sentence end break
+    m = re.search(r'(?<=[.!?])\s+', buffer)
+    if m:
+        return buffer[:m.start() + 1], buffer[m.end():]
+
+    # Try comma break after enough chars
+    if len(buffer) >= TTS_CHUNK_MIN_CHARS * 1.5:
+        m = re.search(r'(?<=,)\s+', buffer)
+        if m:
+            return buffer[:m.start() + 1], buffer[m.end():]
+
+    # Force flush if buffer is getting too long
+    if len(buffer) >= TTS_CHUNK_MIN_CHARS * 3:
+        return buffer, ""
+
+    return None
+
+
 # ── WebSocket voice pipeline ───────────────────────────────────────────
-
-sentence_end_re = re.compile(r'(?<=[.!?])\s+')
-
 
 @app.websocket("/ws/audio")
 async def ws_audio(websocket: WebSocket) -> None:
@@ -66,18 +119,18 @@ async def ws_audio(websocket: WebSocket) -> None:
 
     session_id = str(uuid.uuid4())
     state = ConversationState(session_id=session_id)
-    retriever = Retriever()
+    retriever = get_retriever()  # singleton — no load delay
 
-    # Each connection gets its own STT buffer but shares the heavy model
+    # Per-session STT buffer sharing the singleton model
     stt_model = get_stt()
     stt = WhisperSTT.__new__(WhisperSTT)
     stt.model = stt_model.model
     stt._buffer = bytearray()
     stt._sample_rate = 16000
-    stt._min_duration = 0.8
-    stt._max_duration = 15.0
-    stt._silence_threshold = 300
-    stt._silence_chunks_needed = 8
+    stt._min_duration = 0.5
+    stt._max_duration = 12.0
+    stt._silence_threshold = 250
+    stt._silence_chunks_needed = STT_SILENCE_CHUNKS
     stt._silent_chunks = 0
     stt._has_speech = False
 
@@ -87,6 +140,21 @@ async def ws_audio(websocket: WebSocket) -> None:
     audio_enabled = True
 
     await websocket.send_json({"type": "status", "message": "connected"})
+
+    async def send_tts(text: str) -> None:
+        """Synthesize text and send audio chunk — strips URLs first."""
+        clean = _strip_urls(text)
+        if not clean:
+            return
+        wav_bytes, sr = await tts.synthesize_speech(clean)
+        if wav_bytes:
+            audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
+            await websocket.send_json({
+                "type": "tts",
+                "audio": audio_b64,
+                "sample_rate": sr,
+                "format": "wav",
+            })
 
     async def process_response_stream(text_input: str) -> None:
         nonlocal speaking, audio_enabled
@@ -107,24 +175,15 @@ async def ws_audio(websocket: WebSocket) -> None:
                         "sources": sources,
                     })
 
+
                     if "response" in chunk:
                         full_response = chunk["response"]
                         await websocket.send_json({
                             "type": "token",
                             "content": full_response,
                         })
-
                         if audio_enabled:
-                            wav_bytes, sr = await tts.synthesize_speech(full_response)
-                            if wav_bytes:
-                                audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
-                                await websocket.send_json({
-                                    "type": "tts",
-                                    "audio": audio_b64,
-                                    "sample_rate": sr,
-                                    "format": "wav",
-                                })
-
+                            await send_tts(full_response)
                         await websocket.send_json({
                             "type": "final",
                             "response": full_response,
@@ -141,35 +200,17 @@ async def ws_audio(websocket: WebSocket) -> None:
                         "content": token,
                     })
 
-                    # Stream TTS sentence by sentence for low latency
+                    # Stream TTS chunk-by-chunk for low latency
                     if audio_enabled:
-                        splits = sentence_end_re.split(buffer)
-                        if len(splits) > 1:
-                            to_speak = splits[0]
-                            buffer = splits[-1]
-
+                        result = _should_flush_tts(buffer)
+                        if result is not None:
+                            to_speak, buffer = result
                             if to_speak.strip():
-                                wav_bytes, sr = await tts.synthesize_speech(to_speak)
-                                if wav_bytes:
-                                    audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "tts",
-                                        "audio": audio_b64,
-                                        "sample_rate": sr,
-                                        "format": "wav",
-                                    })
+                                await send_tts(to_speak)
 
-            # Flush remaining text
+            # Flush remaining buffer
             if audio_enabled and buffer.strip():
-                wav_bytes, sr = await tts.synthesize_speech(buffer)
-                if wav_bytes:
-                    audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
-                    await websocket.send_json({
-                        "type": "tts",
-                        "audio": audio_b64,
-                        "sample_rate": sr,
-                        "format": "wav",
-                    })
+                await send_tts(buffer)
 
             await websocket.send_json({
                 "type": "final",

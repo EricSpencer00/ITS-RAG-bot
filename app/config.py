@@ -17,7 +17,9 @@ def _env(key: str, default: str) -> str:
 # RAG Configuration
 # =============================================================================
 OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = _env("OLLAMA_MODEL", "llama3.1:8b")
+OLLAMA_MODEL = _env("OLLAMA_MODEL", "gemma:2b")  # fast default; change to llama3.1:8b for higher quality
+OLLAMA_LLM_NUM_PREDICT = int(_env("OLLAMA_LLM_NUM_PREDICT", "120"))   # token cap — keeps voice responses short
+OLLAMA_TEMPERATURE = float(_env("OLLAMA_TEMPERATURE", "0.15"))         # lower = more deterministic/focused
 EMBED_MODEL = _env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 CHROMA_PATH = _env("CHROMA_PATH", "./data/faiss")
 RAW_DOCS_PATH = _env("RAW_DOCS_PATH", "./data/raw")
@@ -38,10 +40,12 @@ PORT = int(_env("PORT", "8000"))
 # =============================================================================
 # Model sizes: tiny, base, small, medium, large-v3
 # "base" is a good balance of speed & accuracy for M1
-WHISPER_MODEL_SIZE = _env("WHISPER_MODEL_SIZE", "base")
+WHISPER_MODEL_SIZE = _env("WHISPER_MODEL_SIZE", "tiny.en")
 WHISPER_DEVICE = _env("WHISPER_DEVICE", "cpu")       # cpu works great on M1
 WHISPER_COMPUTE_TYPE = _env("WHISPER_COMPUTE_TYPE", "int8")  # int8 is fastest on CPU
 STT_SAMPLE_RATE = int(_env("STT_SAMPLE_RATE", "16000"))
+# Number of silent 100ms chunks before STT commits (4 = ~400ms, was 8 = ~800ms)
+STT_SILENCE_CHUNKS = int(_env("STT_SILENCE_CHUNKS", "4"))
 
 
 # =============================================================================
@@ -53,5 +57,7 @@ STT_SAMPLE_RATE = int(_env("STT_SAMPLE_RATE", "16000"))
 #   en-US-AriaNeural      — female, conversational
 #   en-US-DavisNeural     — male, calm
 TTS_VOICE = _env("TTS_VOICE", "en-US-GuyNeural")
-TTS_RATE = _env("TTS_RATE", "+10%")     # speaking speed adjustment
+TTS_RATE = _env("TTS_RATE", "+15%")     # speaking speed adjustment
 TTS_VOLUME = _env("TTS_VOLUME", "+0%")  # volume adjustment
+# Minimum chars in TTS buffer before a comma-break is allowed
+TTS_CHUNK_MIN_CHARS = int(_env("TTS_CHUNK_MIN_CHARS", "60"))

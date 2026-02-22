@@ -6,7 +6,7 @@ from typing import Dict, List, AsyncGenerator
 
 import requests
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_LLM_NUM_PREDICT, OLLAMA_TEMPERATURE
 from app.conversation.state import ConversationState
 from app.rag.prompt import SYSTEM_PROMPT
 from app.rag.retriever import Retriever
@@ -115,7 +115,7 @@ def _ollama_chat(messages: List[Dict[str, str]]) -> str:
         "model": OLLAMA_MODEL,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": OLLAMA_TEMPERATURE, "num_predict": OLLAMA_LLM_NUM_PREDICT},
     }
     resp = requests.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload, timeout=120)
     resp.raise_for_status()
@@ -128,7 +128,7 @@ async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[
         "model": OLLAMA_MODEL,
         "messages": messages,
         "stream": True,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": OLLAMA_TEMPERATURE, "num_predict": OLLAMA_LLM_NUM_PREDICT},
     }
     
     async with aiohttp.ClientSession() as session:

@@ -15,7 +15,7 @@ from typing import Dict, Optional
 import numpy as np
 from faster_whisper import WhisperModel
 
-from app.config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
+from app.config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE, STT_SILENCE_CHUNKS
 
 
 class WhisperSTT:
@@ -37,13 +37,14 @@ class WhisperSTT:
         self._buffer = bytearray()
         self._sample_rate = 16000
         # Minimum audio length (seconds) before attempting transcription
-        self._min_duration = 0.8
+        self._min_duration = 0.5   # start after 0.5s of speech (was 0.8)
         # Maximum audio length (seconds) before forcing transcription
-        self._max_duration = 15.0
+        self._max_duration = 12.0
         # Silence threshold (RMS below this = silence)
-        self._silence_threshold = 300
+        self._silence_threshold = 250
         # How many consecutive silent chunks before we consider it a pause
-        self._silence_chunks_needed = 8
+        # 4 chunks @ 4096 samples @ 16kHz ≈ 1s of silence (was 8 = ~2s)
+        self._silence_chunks_needed = STT_SILENCE_CHUNKS
         self._silent_chunks = 0
         self._has_speech = False
 
@@ -103,13 +104,14 @@ class WhisperSTT:
         try:
             segments, info = self.model.transcribe(
                 samples,
-                beam_size=5,
+                beam_size=1,          # beam_size=1 is greedy — fastest, minimal accuracy loss
                 language="en",
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=200,
+                    min_silence_duration_ms=300,
+                    speech_pad_ms=100,
                 ),
+                condition_on_previous_text=False,  # faster, no previous context needed
             )
             text = " ".join(seg.text.strip() for seg in segments).strip()
         except Exception as e:
