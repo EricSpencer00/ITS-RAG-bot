@@ -29,13 +29,18 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
 # ── Singletons (load once at startup, shared across all sessions) ──────
 _stt: WhisperSTT | None = None
+# if faster-whisper isn't installed (minimal slug), get_stt will return None
 _retriever: Retriever | None = None
 
 
-def get_stt() -> WhisperSTT:
+def get_stt() -> WhisperSTT | None:
     global _stt
     if _stt is None:
-        _stt = WhisperSTT()
+        try:
+            _stt = WhisperSTT()
+        except Exception as exc:  # WhisperSTT raises RuntimeError if unavailable
+            print(f"[Server] local STT disabled: {exc}")
+            _stt = None
     return _stt
 
 
@@ -51,7 +56,8 @@ def get_retriever() -> Retriever:
 @app.on_event("startup")
 async def startup() -> None:
     """Pre-load heavy models at startup so first request has no latency."""
-    get_stt()
+    # STT may be disabled in core demo; it's okay if get_stt() returns None.
+    _ = get_stt()
     get_retriever()
     print("[Server] ITS Voice RAG Bot ready at http://127.0.0.1:8000")
 
