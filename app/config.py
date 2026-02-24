@@ -34,6 +34,31 @@ RAG_MIN_SCORE = float(_env("RAG_MIN_SCORE", "0.35"))
 HOST = _env("HOST", "0.0.0.0")
 PORT = int(_env("PORT", "8000"))
 
+# default voice prompt for PersonaPlex (see .env.example)
+DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
+
+# =============================================================================
+# HuggingFace Chat API (optional, used instead of Ollama)
+# =============================================================================
+# If HF_CHAT_MODEL is set, the controller will send prompts to the HuggingFace
+# Inference API rather than a local Ollama server.  HF_TOKEN should be a
+# valid HuggingFace API token with access to the chosen model.
+HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "")
+HF_API_URL = _env("HF_API_URL", "https://api-inference.huggingface.co/models")
+HF_TOKEN = _env("HF_TOKEN", "")
+
+# PersonaPlex voice model configuration
+HF_REPO = _env("HF_REPO", "nvidia/personaplex-7b-v1")  # repo containing voice model artifacts
+PERSONAPLEX_DEVICE = _env("PERSONAPLEX_DEVICE", "cuda")
+# set to "true" to enable cpu offloading when GPU memory is limited
+PERSONAPLEX_CPU_OFFLOAD = _env("PERSONAPLEX_CPU_OFFLOAD", "false").lower() in ("1","true","yes")
+
+# (optional) directory path containing pre‑downloaded PersonaPlex voice prompts
+VOICE_PROMPT_DIR = _env("VOICE_PROMPT_DIR", "")
+
+# default conversational persona used by PersonaPlex text engine
+DEFAULT_TEXT_PROMPT = _env("DEFAULT_TEXT_PROMPT", "You are a helpful ITS support assistant. You help users with technology questions clearly and friendly.")
+
 
 # =============================================================================
 # STT Configuration — faster-whisper (CTranslate2)

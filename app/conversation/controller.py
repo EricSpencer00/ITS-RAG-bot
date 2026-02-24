@@ -6,7 +6,13 @@ from typing import Dict, List, AsyncGenerator
 
 import requests
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_LLM_NUM_PREDICT, OLLAMA_TEMPERATURE
+from app.config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_LLM_NUM_PREDICT,
+    OLLAMA_TEMPERATURE,
+    HF_CHAT_MODEL,
+)
 from app.conversation.state import ConversationState
 from app.rag.prompt import SYSTEM_PROMPT
 from app.rag.retriever import Retriever
@@ -123,6 +129,34 @@ def _ollama_chat(messages: List[Dict[str, str]]) -> str:
     return data.get("message", {}).get("content", "")
 
 
+def _hf_chat(messages: List[Dict[str, str]]) -> str:
+    """Send a simple concatenated conversation to HuggingFace inference API.
+
+    This isn't a sophisticated chat protocol; most HF chat-capable models
+    will happily continue from a prompt consisting of alternating role tags.
+    The caller handles max token limits via environment (OLLAMA_LLM_NUM_PREDICT).
+    """
+    from app.config import HF_CHAT_MODEL, HF_API_URL, HF_TOKEN
+
+    # join all messages by role for a basic prompt
+    prompt_lines = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        prompt_lines.append(f"{role}: {content}")
+    prompt = "\n".join(prompt_lines)
+
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
+    payload = {"inputs": prompt, "parameters": {"max_new_tokens": OLLAMA_LLM_NUM_PREDICT}}
+    resp = requests.post(f"{HF_API_URL}/{HF_CHAT_MODEL}", headers=headers, json=payload, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+    # HF usually returns {'generated_text': '...'} or a list of those
+    if isinstance(data, list):
+        return data[0].get("generated_text", "")
+    return data.get("generated_text", "")
+
+
 async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
     payload = {
         "model": OLLAMA_MODEL,
@@ -143,6 +177,17 @@ async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[
                             yield content
                     except json.JSONDecodeError:
                         pass
+
+
+async def _hf_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
+    """Simplified streaming wrapper for HuggingFace API.
+
+    The inference API doesn't offer true streaming easily, so we just call the
+    synchronous client and yield a single chunk. This preserves the async
+    interface used by the rest of the code.
+    """
+    text = _hf_chat(messages)
+    yield text
 
 
 async def handle_user_text_stream(state: ConversationState, text: str, retriever: Retriever) -> AsyncGenerator[Dict, None]:
@@ -198,9 +243,15 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
     })
     
     full_response = []
-    async for token in _ollama_chat_stream(messages):
-        full_response.append(token)
-        yield {"type": "token", "content": token}
+    # choose chat backend based on configuration
+    if HF_CHAT_MODEL:
+        async for token in _hf_chat_stream(messages):
+            full_response.append(token)
+            yield {"type": "token", "content": token}
+    else:
+        async for token in _ollama_chat_stream(messages):
+            full_response.append(token)
+            yield {"type": "token", "content": token}
     
     state.add_turn("assistant", "".join(full_response))
 
@@ -246,7 +297,12 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
         "content": f"Question: {text}\n\nContext:\n{context}"
     })
     
-    answer = _ollama_chat(messages)
+    # choose chat backend at runtime
+    if HF_CHAT_MODEL:
+        answer = _hf_chat(messages)
+    else:
+        answer = _ollama_chat(messages)
+
     response = answer.strip()
     state.add_turn("assistant", response)
     return {"response": response, "intent": intent, "sources": docs}

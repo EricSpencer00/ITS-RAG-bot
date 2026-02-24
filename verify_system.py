@@ -48,7 +48,8 @@ def check_config():
     try:
         from app.config import (
             HOST, PORT, DEFAULT_VOICE_PROMPT, HF_TOKEN,
-            PERSONAPLEX_DEVICE, RAG_TOP_K, OLLAMA_MODEL
+            PERSONAPLEX_DEVICE, RAG_TOP_K, OLLAMA_MODEL,
+            HF_CHAT_MODEL, HF_API_URL
         )
         
         print(f"  ✓ HOST: {HOST}")
@@ -57,6 +58,8 @@ def check_config():
         print(f"  ✓ Device: {PERSONAPLEX_DEVICE}")
         print(f"  ✓ RAG top-k: {RAG_TOP_K}")
         print(f"  ✓ LLM: {OLLAMA_MODEL}")
+        if HF_CHAT_MODEL:
+            print(f"  ✓ HF chat model: {HF_CHAT_MODEL} (via {HF_API_URL})")
         
         if HF_TOKEN:
             print(f"  ✓ HF_TOKEN: {'*' * 10}...{HF_TOKEN[-4:]}")
