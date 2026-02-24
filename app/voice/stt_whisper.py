@@ -13,7 +13,13 @@ import tempfile
 from typing import Dict, Optional
 
 import numpy as np
-from faster_whisper import WhisperModel
+
+# faster-whisper may not be installed in a lightweight deployment.  Import
+# lazily and fall back to raising a helpful error when the class is used.
+try:
+    from faster_whisper import WhisperModel
+except ImportError:  # pragma: no cover
+    WhisperModel = None  # type: ignore[var-annotated]
 
 from app.config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE, STT_SILENCE_CHUNKS
 
@@ -26,6 +32,11 @@ class WhisperSTT:
     """
 
     def __init__(self) -> None:
+        if WhisperModel is None:
+            raise RuntimeError(
+                "Whisper STT is not available because `faster-whisper` is not installed. "
+                "Install the full requirements or disable local STT."
+            )
         print(f"[STT] Loading Whisper model '{WHISPER_MODEL_SIZE}' on {WHISPER_DEVICE}...")
         self.model = WhisperModel(
             WHISPER_MODEL_SIZE,

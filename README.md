@@ -10,7 +10,16 @@ python3 -m venv .venv311
 source .venv311/bin/activate
 
 # 2. Install dependencies
+#
+# The repo maintains two sets of requirements:
+#   * requirements.txt      – minimal set used for lightweight/demo
+#    deployments (Heroku slug friendly).
+#   * requirements-full.txt – full set including ML/RAG/LLM libs for
+#    local development or if running everything on the same host.
+#
+# To install the full set, run `pip install -r requirements-full.txt`.
 pip install -r requirements.txt
+
 
 # 3. Download Vosk model
 mkdir -p models

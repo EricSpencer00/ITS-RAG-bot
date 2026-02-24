@@ -4,15 +4,30 @@ import pickle
 from pathlib import Path
 from typing import List, Dict
 
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
+# these imports are heavy and not required for a stripped-down demo; if the
+# ML/RAG dependencies are missing the module will still import but the
+# Retriever class raises a helpful error when used.
+try:
+    import faiss
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover - demo environment may omit these
+    faiss = None  # type: ignore[var-annotated]
+    np = None  # type: ignore[var-annotated]
+    SentenceTransformer = None  # type: ignore[var-annotated]
 
 from app.config import CHROMA_PATH, EMBED_MODEL, RAG_TOP_K, RAG_MIN_SCORE
 
 
 class Retriever:
     def __init__(self) -> None:
+        if SentenceTransformer is None or faiss is None or np is None:
+            raise RuntimeError(
+                "RAG/embedding libraries not installed. "
+                "Install the full requirements (`requirements-full.txt`) or run in an environment "
+                "that includes `faiss-cpu` and `sentence-transformers`."
+            )
+
         self.embedder = SentenceTransformer(EMBED_MODEL)
         index_path = Path(CHROMA_PATH) / "faiss.index"
         meta_path = Path(CHROMA_PATH) / "metadata.pkl"

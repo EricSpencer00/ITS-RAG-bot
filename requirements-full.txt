@@ -1,0 +1,38 @@
+# Complete dependency set used for local development or when hosting
+# the full model pipeline on the same machine.  Most of these packages
+# are *not* required for a lightweight demo deployment.
+
+# ── Web Framework ──
+fastapi>=0.128.0
+uvicorn[standard]>=0.40.0
+aiohttp>=3.10.0
+websockets>=16.0
+
+# ── STT — faster-whisper (CTranslate2) ──
+faster-whisper>=1.1.0
+
+# ── TTS — Edge TTS (Microsoft neural voices) ──
+edge-tts>=6.1.0
+soundfile>=0.12.0
+
+# ── RAG ──
+sentence-transformers>=3.0.0
+faiss-cpu>=1.7.0
+trafilatura>=1.6.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
+# ── LLM ──
+torch>=2.2.0
+numpy<2
+
+# ── Voice helpers ──
+# sphn is required by PersonaPlex for Opus encoding/decoding
+sphn>=0.2.1
+sentencepiece>=0.2,<0.3
+
+# ── Utilities ──
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+tqdm>=4.60.0
+PyYAML>=6.0.0
