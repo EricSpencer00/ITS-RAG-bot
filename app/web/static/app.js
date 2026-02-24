@@ -21,11 +21,41 @@ let isPlayingQueue = false;
 let currentAssistantMessageDiv = null;
 let currentAssistantBubble = null;
 let currentAssistantRawText = "";
+let typingIndicator = null;
 
 const TARGET_SAMPLE_RATE = 16000;
 
 function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function showTypingIndicator() {
+    if (typingIndicator) return;
+    
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "message assistant";
+    
+    const bubble = document.createElement("div");
+    bubble.className = "bubble typing-bubble";
+    bubble.innerHTML = `
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+    `;
+    
+    msgDiv.appendChild(bubble);
+    messagesEl.appendChild(msgDiv);
+    typingIndicator = msgDiv;
+    scrollToBottom();
+    updateStatus();
+}
+
+function hideTypingIndicator() {
+    if (typingIndicator) {
+        typingIndicator.remove();
+        typingIndicator = null;
+        updateStatus();
+    }
 }
 
 function linkifyText(text) {
@@ -113,23 +143,48 @@ function renderSources(sources) {
 }
 
 function setConnection(connected) {
-    connectionStatus.textContent = connected ? "Connected" : "Disconnected";
-    connectionDot.className = `status-dot ${connected ? "connected" : ""}`;
-    if (connected) {
-        sendBtn.disabled = false;
-        startBtn.disabled = isListening; 
-    } else {
+    if (!connected) {
+        connectionStatus.textContent = "Disconnected";
+        connectionDot.className = "status-dot";
         sendBtn.disabled = true;
         startBtn.disabled = true;
         stopBtn.disabled = true;
+    } else {
+        updateStatus();
+    }
+}
+
+function updateStatus() {
+    if (isListening) {
+        connectionStatus.textContent = "Listening...";
+        connectionDot.className = "status-dot listening";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        sendBtn.disabled = false;
+    } else if (typingIndicator) {
+        connectionStatus.textContent = "Thinking...";
+        connectionDot.className = "status-dot thinking";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        sendBtn.disabled = false;
+    } else if (isSpeaking) {
+        connectionStatus.textContent = "Speaking...";
+        connectionDot.className = "status-dot speaking";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        sendBtn.disabled = false;
+    } else {
+        connectionStatus.textContent = "Connected";
+        connectionDot.className = "status-dot connected";
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        sendBtn.disabled = false;
     }
 }
 
 function setListening(listening) {
-    connectionDot.className = `status-dot ${listening ? "listening" : "connected"}`;
-    startBtn.disabled = listening;
-    stopBtn.disabled = !listening;
     isListening = listening;
+    updateStatus();
 }
 
 function stopPlayback() {
@@ -141,17 +196,20 @@ function stopPlayback() {
         currentAudio = null;
     }
     isSpeaking = false;
+    updateStatus();
 }
 
 function playNextInQueue() {
     if (audioQueue.length === 0) {
         isPlayingQueue = false;
         isSpeaking = false;
+        updateStatus();
         return;
     }
   
     isPlayingQueue = true;
     isSpeaking = true;
+    updateStatus();
     const base64Audio = audioQueue.shift();
   
     try {
@@ -261,14 +319,17 @@ function connectWebSocket() {
         switch (msg.type) {
             case "partial":
                 partialEl.textContent = msg.text + "...";
+                partialEl.style.opacity = "1";
                 break;
                 
             case "final_text":
                 partialEl.textContent = "";
+                partialEl.style.opacity = "0";
                 createMessage("user", msg.text);
                 // Reset assistant bubble for new response
                 currentAssistantBubble = null;
                 currentAssistantMessageDiv = null;
+                showTypingIndicator(); // Show typing indicator when user finishes speaking
                 break;
                 
             case "meta":
@@ -278,6 +339,7 @@ function connectWebSocket() {
                 
             case "token":
                 // Real-time text streaming
+                hideTypingIndicator(); // Hide indicator when tokens start arriving
                 appendToAssistantMessage(msg.content);
                 break;
                 
@@ -291,6 +353,7 @@ function connectWebSocket() {
                 
             case "final":
                 // Ensure full text is synced or logged
+                hideTypingIndicator(); // Hide in case it's still there
                 if (!currentAssistantBubble && msg.response) {
                      // In case token streaming failed or wasn't used
                      createMessage("assistant", msg.response);
@@ -300,6 +363,7 @@ function connectWebSocket() {
                 
             case "error":
                 console.error("Server error:", msg.message);
+                hideTypingIndicator();
                 createMessage("assistant", "Error: " + msg.message);
                 break;
         }
@@ -356,6 +420,8 @@ async function stopListening() {
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     if (audioContext) { await audioContext.close(); audioContext = null; }
     setListening(false);
+    partialEl.textContent = "";
+    partialEl.style.opacity = "0";
 }
 
 // Event Listeners
@@ -366,6 +432,7 @@ sendBtn.addEventListener("click", () => {
     createMessage("user", text);
     currentAssistantBubble = null;
     currentAssistantMessageDiv = null;
+    showTypingIndicator(); // Show typing indicator immediately for text input
     
     ws.send(JSON.stringify({ type: "text", text }));
     textInput.value = "";

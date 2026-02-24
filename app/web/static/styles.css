@@ -108,12 +108,14 @@ main {
     background-color: #007aff;
     color: #fff;
     border-bottom-right-radius: 0.25rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .message.assistant .bubble {
     background-color: #f0f0f0;
     color: #333;
     border-bottom-left-radius: 0.25rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 .meta-sources {
@@ -137,6 +139,21 @@ main {
 .inline-link { color: #007aff; text-decoration: none; }
 .inline-link:hover { text-decoration: underline; }
 
+#partial-transcript {
+    position: absolute;
+    bottom: 80px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    font-size: 0.9rem;
+    pointer-events: none;
+    padding: 0 2rem;
+    transition: opacity 0.3s;
+    z-index: 5;
+}
+
 #input-area {
     padding: 1.5rem 2rem;
     border-top: 1px solid #eee;
@@ -144,6 +161,7 @@ main {
     display: flex;
     gap: 1rem;
     align-items: center;
+    position: relative;
 }
 
 #textInput {
@@ -215,4 +233,55 @@ input:checked + .slider:before { transform: translateX(16px); }
     font-size: 0.9rem;
     color: #333;
     margin-right: 0.5rem;
+}
+
+/* Typing indicator styles */
+.typing-bubble {
+    display: flex;
+    gap: 4px;
+    padding: 10px 15px !important;
+    background-color: #f0f0f0 !important;
+    border-top-left-radius: 0.25rem;
+    align-items: center;
+    min-height: 20px;
+    width: fit-content;
+}
+
+.typing-dot {
+    width: 6px;
+    height: 6px;
+    background-color: #999;
+    border-radius: 50%;
+    animation: typing 1s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+    0%, 100% { transform: translateY(0); opacity: 0.6; }
+    50% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Status dot "Thinking" color */
+.status-dot.thinking {
+    background-color: #ff9800; /* Orange */
+    animation: pulse 0.8s infinite;
+}
+
+/* Status dot "Speaking" color */
+.status-dot.speaking {
+    background-color: #2196f3; /* Blue */
+    animation: pulse 1.2s infinite;
+}
+
+/* Message animation */
+.message {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
