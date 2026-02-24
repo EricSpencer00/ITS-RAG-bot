@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ITS AI Assistant</title>
+    <title>LUC ITS Assistant</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <header>
-        <h1>ITS Support Assistant</h1>
+        <div class="logo-area">
+            <h1>Loyola ITS Assistant</h1>
+        </div>
         <div class="controls">
             <div class="toggle-group">
-                <span class="control-label">Voice Output</span>
+                <span class="control-label">Voice</span>
                 <label class="switch">
                     <input type="checkbox" id="audioToggle" checked>
                     <span class="slider round"></span>
@@ -19,8 +21,11 @@
             </div>
             <div class="status-indicator">
                 <span id="connection-dot" class="status-dot"></span>
-                <span id="connection-status">Disconnected</span>
+                <span id="connection-status">Connecting...</span>
             </div>
+            <button id="clearBtn" title="Clear Chat" style="background: rgba(255,255,255,0.1); padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                Clear
+            </button>
         </div>
     </header>
 
@@ -28,17 +33,12 @@
         <div id="chat-container">
             <div id="messages">
                 <!-- Messages will appear here -->
-                <div class="message assistant">
-                    <div class="bubble">
-                        Hello! I'm your Loyola ITS RAG Model, how can I help?
-                    </div>
-                </div>
             </div>
             
             <div id="input-area">
                 <div id="partial-transcript" style="opacity: 0;"></div>
                 
-                <input type="text" id="textInput" placeholder="Type a message or click microphone..." autocomplete="off">
+                <input type="text" id="textInput" placeholder="Ask a question about LUC systems..." autocomplete="off">
                 
                 <button id="sendBtn" title="Send (Enter)">
                     <svg class="icon icon-send" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -46,10 +46,12 @@
                 
                 <button id="startBtn" title="Start Voice">
                     <svg class="icon icon-mic" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.44 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                    <span>Start Talk</span>
                 </button>
                 
                 <button id="stopBtn" title="Stop Voice" disabled>
                     <svg class="icon icon-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                    <span>Stop</span>
                 </button>
             </div>
         </div>

@@ -1,6 +1,7 @@
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const sendBtn = document.getElementById("sendBtn");
+const clearBtn = document.getElementById("clearBtn");
 const textInput = document.getElementById("textInput");
 const messagesEl = document.getElementById("messages");
 const partialEl = document.getElementById("partial-transcript");
@@ -425,6 +426,12 @@ async function stopListening() {
 }
 
 // Event Listeners
+clearBtn.addEventListener("click", () => {
+    messagesEl.innerHTML = "";
+    currentAssistantBubble = null;
+    currentAssistantMessageDiv = null;
+});
+
 sendBtn.addEventListener("click", () => {
     const text = textInput.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
