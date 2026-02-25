@@ -151,18 +151,26 @@ async def ws_audio(websocket: WebSocket) -> None:
     state = ConversationState(session_id=session_id)
     retriever = get_retriever()  # singleton — no load delay
 
-    # Per-session STT buffer sharing the singleton model
-    stt_model = get_stt()
-    stt = WhisperSTT.__new__(WhisperSTT)
-    stt.model = stt_model.model
-    stt._buffer = bytearray()
-    stt._sample_rate = 16000
-    stt._min_duration = 0.5
-    stt._max_duration = 12.0
-    stt._silence_threshold = 250
-    stt._silence_chunks_needed = STT_SILENCE_CHUNKS
-    stt._silent_chunks = 0
-    stt._has_speech = False
+    # Initialize STT handler.  We prefer a remote provider (STT_API) if
+    # configured; otherwise we attempt to reuse the singleton Whisper model.
+    stt = None
+    if STT_API:
+        from app.voice.remote_stt import RemoteSTT
+        stt = RemoteSTT()
+    else:
+        stt_model = get_stt()
+        if stt_model is not None:
+            stt = WhisperSTT.__new__(WhisperSTT)
+            stt.model = stt_model.model
+            stt._buffer = bytearray()
+            stt._sample_rate = 16000
+            stt._min_duration = 0.5
+            stt._max_duration = 12.0
+            stt._silence_threshold = 250
+            stt._silence_chunks_needed = STT_SILENCE_CHUNKS
+            stt._silent_chunks = 0
+            stt._has_speech = False
+    # if stt is still None, we'll refuse audio messages later
 
     tts = EdgeTTS()
 
