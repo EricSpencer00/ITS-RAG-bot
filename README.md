@@ -90,6 +90,8 @@ locally.  Set the following config vars on Heroku (or in your `.env`):
 ```bash
 heroku config:set HF_CHAT_MODEL="tiiuae/falcon-7b-instruct" \
                   HF_TOKEN="<your-hf-token>"
+# note: this is the recommended free-tier model and is already used by
+# default if HF_CHAT_MODEL is unset
 # optional custom HF URL, e.g. for a self‑hosted API
 # heroku config:set HF_API_URL="https://my-hf-host/models"
 ```

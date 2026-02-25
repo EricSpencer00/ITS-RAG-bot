@@ -43,7 +43,8 @@ DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
 # If HF_CHAT_MODEL is set, the controller will send prompts to the HuggingFace
 # Inference API rather than a local Ollama server.  HF_TOKEN should be a
 # valid HuggingFace API token with access to the chosen model.
-HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "")
+# recommended default model for hosted LLM (free tier)
+HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "tiiuae/falcon-7b-instruct")
 
 # remote STT configuration
 STT_API = _env("STT_API", "")  # "hf" or "openai" or empty for local
