@@ -133,6 +133,16 @@ def _should_flush_tts(buffer: str) -> tuple[str, str] | None:
 
 # ── WebSocket voice pipeline ───────────────────────────────────────────
 
+
+@app.post("/api/text")
+async def http_chat(body: dict) -> Dict[str, object]:
+    """Simple HTTP endpoint for text-only clients or when WS fails."""
+    text = body.get("text", "")
+    state = ConversationState(session_id=str(uuid.uuid4()))
+    retriever = get_retriever()
+    return handle_user_text(state, text, retriever)
+
+
 @app.websocket("/ws/audio")
 async def ws_audio(websocket: WebSocket) -> None:
     await websocket.accept()

@@ -434,21 +434,44 @@ clearBtn.addEventListener("click", () => {
     currentAssistantMessageDiv = null;
 });
 
-sendBtn.addEventListener("click", () => {
+sendBtn.addEventListener("click", async () => {
     const text = textInput.value.trim();
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    
+    if (!text) return;
+
     createMessage("user", text);
     currentAssistantBubble = null;
     currentAssistantMessageDiv = null;
     showTypingIndicator(); // Show typing indicator immediately for text input
-    
-    ws.send(JSON.stringify({ type: "text", text }));
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "text", text }));
+    } else {
+        // fallback to HTTP
+        try {
+            const resp = await fetch("/api/text", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text }),
+            });
+            const data = await resp.json();
+            // emulate streaming by sending whole response
+            if (data.response) {
+                appendToAssistantMessage(data.response);
+                renderSources(data.sources || []);
+            }
+        } catch (err) {
+            console.error("HTTP chat failed", err);
+        }
+    }
+
     textInput.value = "";
 });
 
 textInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendBtn.click();
+    if (e.key === "Enter") {
+        e.preventDefault();
+        sendBtn.click();
+    }
 });
 
 startBtn.addEventListener("click", () => {
