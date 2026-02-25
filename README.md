@@ -88,12 +88,14 @@ The demo can talk to free HuggingFace endpoints rather than running models
 locally.  Set the following config vars on Heroku (or in your `.env`):
 
 ```bash
-heroku config:set HF_CHAT_MODEL="mistralai/Mistral-7B-Instruct-v0.2" \
+heroku config:set HF_CHAT_MODEL="tiiuae/zephyr-7b-instruct" \
                   HF_TOKEN="<your-hf-token>"
-# note: the previous `tiiuae/falcon-7b-instruct` endpoint has been retired;
-# the above default is actively supported and works well for RAG.  You can
-# substitute any other compatible HF model as needed.
+# note: many of the earlier free endpoints (falcon‑7b‑instruct, mistralai/7B,
+# even the 7B‑Instruct-v0.2 release) now return HTTP 410.  `tiiuae/zephyr-7b-
+# instruct` is a working fall‑back that is free to use; feel free to swap in
+# another model of your choice.
 # optional custom HF URL, e.g. for a self‑hosted API
+# by default the code uses the new `router.huggingface.co` service
 # heroku config:set HF_API_URL="https://my-hf-host/models"
 ```
 

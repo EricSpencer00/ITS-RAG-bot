@@ -44,16 +44,21 @@ DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
 # Inference API rather than a local Ollama server.  HF_TOKEN should be a
 # valid HuggingFace API token with access to the chosen model.
 # recommended default model for hosted LLM (free tier)
-# previous endpoint (tiiuae/falcon-7b-instruct) was removed; switch to a
-# currently available instruction model such as Mistral or Zephyr.
-HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
+# previous endpoints like `falcon-7b-instruct` or the earlier Mistral 7B have
+# been retired (HTTP 410).  The default now points to Zephyr which is actively
+# maintained and works on the free tier.  You can override with any other
+# instruction‑capable HF model if desired.
+HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "tiiuae/zephyr-7b-instruct")
 
 # remote STT configuration
 STT_API = _env("STT_API", "")  # "hf" or "openai" or empty for local
-HF_API_URL = _env("HF_API_URL", "https://api-inference.huggingface.co/models")
+HF_API_URL = _env("HF_API_URL", "https://router.huggingface.co/models")
 HF_TOKEN = _env("HF_TOKEN", "")
 
-HF_API_URL = _env("HF_API_URL", "https://api-inference.huggingface.co/models")
+# the old api-inference endpoint was retired in early 2026; use the
+# `router.huggingface.co` service instead.  Users wishing to self-host
+# or proxy the inference API can override HF_API_URL accordingly.
+HF_API_URL = _env("HF_API_URL", "https://router.huggingface.co/models")
 HF_TOKEN = _env("HF_TOKEN", "")
 
 # PersonaPlex voice model configuration
