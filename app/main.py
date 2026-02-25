@@ -44,12 +44,16 @@ def get_stt() -> WhisperSTT | None:
     return _stt
 
 
-def get_retriever() -> Retriever:
+def get_retriever() -> Retriever | None:
     global _retriever
     if _retriever is None:
-        print("[Server] Loading RAG retriever + embeddings...")
-        _retriever = Retriever()
-        print("[Server] RAG retriever ready.")
+        try:
+            print("[Server] Loading RAG retriever + embeddings...")
+            _retriever = Retriever()
+            print("[Server] RAG retriever ready.")
+        except Exception as exc:  # may be RuntimeError from missing libs
+            print(f"[Server] RAG disabled: {exc}")
+            _retriever = None
     return _retriever
 
 
@@ -58,7 +62,9 @@ async def startup() -> None:
     """Pre-load heavy models at startup so first request has no latency."""
     # STT may be disabled in core demo; it's okay if get_stt() returns None.
     _ = get_stt()
-    get_retriever()
+    # RAG may be disabled too; we call get_retriever() to trigger its initialization
+    # but treat a None value as acceptable.
+    _ = get_retriever()
     print("[Server] ITS Voice RAG Bot ready at http://127.0.0.1:8000")
 
 
