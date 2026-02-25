@@ -82,14 +82,38 @@ The app is container‑friendly. two primary paths to the internet:
    HuggingFace inference) or `OLLAMA_BASE_URL`/`OLLAMA_MODEL` if using a
    local Ollama server.
 
-### HuggingFace inference
+### HuggingFace inference and remote STT
 
-To avoid running a local LLM you can configure the voice bot to hit the
-HuggingFace Hosted Inference API by setting `HF_CHAT_MODEL` (e.g.
-`"tiiuae/falcon-7b-instruct"`) and `HF_TOKEN`.
-The controller concatenates conversation history into a single prompt and
-sends it to `https://api-inference.huggingface.co/models/<model>`.
-Streaming responses are emulated by returning the complete answer as one
-chunk.
+The demo can talk to free HuggingFace endpoints rather than running models
+locally.  Set the following config vars on Heroku (or in your `.env`):
 
-Leave `HF_CHAT_MODEL` empty to fall back to the Ollama URL defined above.
+```bash
+heroku config:set HF_CHAT_MODEL="tiiuae/falcon-7b-instruct" \
+                  HF_TOKEN="<your-hf-token>"
+# optional custom HF URL, e.g. for a self‑hosted API
+# heroku config:set HF_API_URL="https://my-hf-host/models"
+```
+
+With these variables present the bot uses `_hf_chat()` in
+`app/conversation/controller.py` to send prompts and receive completions.
+If `HF_CHAT_MODEL` is unset the code falls back to your local Ollama server.
+
+#### Remote STT
+
+You can also perform speech‑to‑text via an external service instead of
+`faster-whisper`.  Use the `STT_API` var to choose the provider:
+
+* `STT_API=hf` – call HuggingFace’s `openai/whisper-1` endpoint (uses the
+  same `HF_TOKEN`).
+* `STT_API=openai` – call OpenAI’s Whisper API (`OPENAI_API_KEY` must be set).
+
+No additional Python packages are required; the `RemoteSTT` helper lives in
+`app/voice/remote_stt.py` and is selected automatically when `STT_API` is
+nonempty.
+
+Leave `STT_API` unset to attempt loading the local Whisper model (which will
+fail gracefully on a minimal slug).
+
+This configuration lets you deploy a fully functional demo on Heroku using
+only free-tier cloud APIs.  The dyno remains small (< 60 MB) because none of
+`torch`/`faiss`/`faster-whisper` is installed.

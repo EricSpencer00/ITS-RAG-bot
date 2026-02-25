@@ -44,6 +44,12 @@ DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
 # Inference API rather than a local Ollama server.  HF_TOKEN should be a
 # valid HuggingFace API token with access to the chosen model.
 HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "")
+
+# remote STT configuration
+STT_API = _env("STT_API", "")  # "hf" or "openai" or empty for local
+HF_API_URL = _env("HF_API_URL", "https://api-inference.huggingface.co/models")
+HF_TOKEN = _env("HF_TOKEN", "")
+
 HF_API_URL = _env("HF_API_URL", "https://api-inference.huggingface.co/models")
 HF_TOKEN = _env("HF_TOKEN", "")
 

@@ -15,10 +15,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import STT_SILENCE_CHUNKS, TTS_CHUNK_MIN_CHARS
+from app.config import STT_SILENCE_CHUNKS, TTS_CHUNK_MIN_CHARS, STT_API
 from app.conversation.controller import handle_user_text_stream
 from app.conversation.state import ConversationState
 from app.rag.retriever import Retriever
+
+# STT classes; remote_stt imported lazily if required
 from app.voice.stt_whisper import WhisperSTT
 from app.voice.tts_edge import EdgeTTS
 
@@ -33,14 +35,20 @@ _stt: WhisperSTT | None = None
 _retriever: Retriever | None = None
 
 
-def get_stt() -> WhisperSTT | None:
+def get_stt():
     global _stt
     if _stt is None:
-        try:
-            _stt = WhisperSTT()
-        except Exception as exc:  # WhisperSTT raises RuntimeError if unavailable
-            print(f"[Server] local STT disabled: {exc}")
-            _stt = None
+        # choose remote provider if configured
+        if STT_API:
+            from app.voice.remote_stt import RemoteSTT
+            print(f"[Server] using remote STT provider={STT_API}")
+            _stt = RemoteSTT()
+        else:
+            try:
+                _stt = WhisperSTT()
+            except Exception as exc:  # WhisperSTT raises RuntimeError if unavailable
+                print(f"[Server] local STT disabled: {exc}")
+                _stt = None
     return _stt
 
 
