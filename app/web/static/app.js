@@ -296,7 +296,9 @@ function computeRms(float32Array) {
 
 // WebSocket Management
 function connectWebSocket() {
-    ws = new WebSocket(`ws://${location.host}/ws/audio`);
+    // use secure websocket when page is served over HTTPS
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}/ws/audio`);
 
     ws.onopen = () => {
         setConnection(true);
