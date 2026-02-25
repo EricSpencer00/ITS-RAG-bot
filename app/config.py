@@ -44,7 +44,9 @@ DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
 # Inference API rather than a local Ollama server.  HF_TOKEN should be a
 # valid HuggingFace API token with access to the chosen model.
 # recommended default model for hosted LLM (free tier)
-HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "tiiuae/falcon-7b-instruct")
+# previous endpoint (tiiuae/falcon-7b-instruct) was removed; switch to a
+# currently available instruction model such as Mistral or Zephyr.
+HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
 
 # remote STT configuration
 STT_API = _env("STT_API", "")  # "hf" or "openai" or empty for local

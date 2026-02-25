@@ -88,10 +88,11 @@ The demo can talk to free HuggingFace endpoints rather than running models
 locally.  Set the following config vars on Heroku (or in your `.env`):
 
 ```bash
-heroku config:set HF_CHAT_MODEL="tiiuae/falcon-7b-instruct" \
+heroku config:set HF_CHAT_MODEL="mistralai/Mistral-7B-Instruct-v0.2" \
                   HF_TOKEN="<your-hf-token>"
-# note: this is the recommended free-tier model and is already used by
-# default if HF_CHAT_MODEL is unset
+# note: the previous `tiiuae/falcon-7b-instruct` endpoint has been retired;
+# the above default is actively supported and works well for RAG.  You can
+# substitute any other compatible HF model as needed.
 # optional custom HF URL, e.g. for a self‑hosted API
 # heroku config:set HF_API_URL="https://my-hf-host/models"
 ```
