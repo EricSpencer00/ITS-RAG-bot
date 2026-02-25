@@ -214,7 +214,10 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
         yield {"type": "meta", "intent": intent, "sources": [], "response": draft}
         return
 
-    docs = retriever.query(text)
+    if retriever is not None:
+        docs = retriever.query(text)
+    else:
+        docs = []
     
     yield {"type": "meta", "intent": intent, "sources": docs}
 
@@ -272,7 +275,10 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
         state.add_turn("assistant", draft)
         return {"response": draft, "intent": intent, "sources": []}
 
-    docs = retriever.query(text)
+    if retriever is not None:
+        docs = retriever.query(text)
+    else:
+        docs = []
     if not docs:
         context = "No specific Loyola documentation found."
     else:
