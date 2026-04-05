@@ -8,6 +8,7 @@ const partialEl = document.getElementById("partial-transcript");
 const connectionStatus = document.getElementById("connection-status");
 const connectionDot = document.getElementById("connection-dot");
 const audioToggle = document.getElementById("audioToggle");
+const modelSelect = document.getElementById("modelSelect");
 
 let ws = null;
 let audioContext = null;
@@ -485,13 +486,39 @@ stopBtn.addEventListener("click", stopListening);
 
 audioToggle.addEventListener("change", () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ 
-            type: "config", 
-            audio_enabled: audioToggle.checked 
+        ws.send(JSON.stringify({
+            type: "config",
+            audio_enabled: audioToggle.checked
         }));
     }
     if (!audioToggle.checked) {
         stopPlayback();
+    }
+});
+
+modelSelect.addEventListener("change", async () => {
+    const model = modelSelect.value;
+    try {
+        const resp = await fetch("/api/models/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model }),
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+            console.log(`[Model] Switched to ${model}`);
+            // Optional: show user feedback
+            const info = data.info;
+            if (info) {
+                console.log(`[Model] ${info.size} - ${info.quality}`);
+            }
+        } else {
+            console.error(`[Model] Failed to switch:`, data.message);
+            // Reset dropdown on error
+            setTimeout(() => location.reload(), 1000);
+        }
+    } catch (err) {
+        console.error("[Model] Switch error:", err);
     }
 });
 

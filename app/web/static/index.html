@@ -12,6 +12,17 @@
             <h1>Loyola ITS Assistant</h1>
         </div>
         <div class="controls">
+            <div class="model-selector">
+                <label for="modelSelect" class="control-label">Model:</label>
+                <select id="modelSelect" title="Switch LLM model">
+                    <option value="qwen2-0.5b">Qwen 0.5B ⚡</option>
+                    <option value="qwen2-1.5b">Qwen 1.5B ⚡</option>
+                    <option value="qwen2-7b">Qwen 7B 🔥</option>
+                    <option value="mistral-7b">Mistral 7B 🔥</option>
+                    <option value="zephyr-7b" selected>Zephyr 7B 🔥</option>
+                    <option value="falcon-7b">Falcon 7B 🔥</option>
+                </select>
+            </div>
             <div class="toggle-group">
                 <span class="control-label">Voice</span>
                 <label class="switch">

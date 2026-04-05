@@ -11,7 +11,6 @@ from app.config import (
     OLLAMA_MODEL,
     OLLAMA_LLM_NUM_PREDICT,
     OLLAMA_TEMPERATURE,
-    HF_CHAT_MODEL,
 )
 from app.conversation.state import ConversationState
 from app.rag.prompt import SYSTEM_PROMPT
@@ -171,8 +170,12 @@ def _ollama_chat(messages: List[Dict[str, str]]) -> str:
 
 def _hf_chat(messages: List[Dict[str, str]]) -> str:
     """Send a conversation to HuggingFace inference API via InferenceClient."""
-    from app.config import HF_CHAT_MODEL, HF_TOKEN
+    from app.config import HF_TOKEN
+    from app.model_manager import get_model_manager
     from huggingface_hub import InferenceClient
+
+    model_manager = get_model_manager()
+    model = model_manager.get_current_model()
 
     prompt_lines = []
     for m in messages:
@@ -184,15 +187,15 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
     client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else InferenceClient()
     try:
         generated = client.text_generation(prompt,
-                                           model=HF_CHAT_MODEL,
+                                           model=model,
                                            max_new_tokens=OLLAMA_LLM_NUM_PREDICT,
                                            temperature=OLLAMA_TEMPERATURE)
     except Exception as exc:
         err_str = str(exc)
         if "404" in err_str or "not found" in err_str.lower():
             raise RuntimeError(
-                f"HF chat model '{HF_CHAT_MODEL}' not available; received 404. "
-                "Check HF_CHAT_MODEL and HF_TOKEN or try another model."
+                f"HF chat model '{model}' not available; received 404. "
+                "Check HF_TOKEN or try another model."
             ) from exc
         raise
     return str(generated)
@@ -222,8 +225,15 @@ async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[
 
 async def _hf_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
     """Wrapper — yields a single chunk since HF doesn't stream easily."""
-    text = _hf_chat(messages)
-    yield text
+    try:
+        text = _hf_chat(messages)
+        if text:
+            yield text
+    except StopIteration:
+        # HF client may raise StopIteration; convert to proper error handling
+        yield "I encountered an issue processing that request. Please try again."
+    except Exception as e:
+        yield f"Error: {str(e)}"
 
 
 # ── Diagnostic hint injected when Lu should ask a question ────────────
@@ -286,8 +296,12 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
     messages.append({"role": "user", "content": user_content})
 
     # ── Stream LLM response ───────────────────────────────────────────
+    from app.model_manager import get_model_manager
+    model_manager = get_model_manager()
+    use_hf = model_manager.get_current_model() != OLLAMA_MODEL
+
     full_response = []
-    if HF_CHAT_MODEL:
+    if use_hf:
         async for token in _hf_chat_stream(messages):
             full_response.append(token)
             yield {"type": "token", "content": token}
@@ -339,7 +353,11 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
 
     messages.append({"role": "user", "content": user_content})
 
-    if HF_CHAT_MODEL:
+    from app.model_manager import get_model_manager
+    model_manager = get_model_manager()
+    use_hf = model_manager.get_current_model() != OLLAMA_MODEL
+
+    if use_hf:
         answer = _hf_chat(messages)
     else:
         answer = _ollama_chat(messages)

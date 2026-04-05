@@ -11,12 +11,14 @@ import json
 import re
 import uuid
 
+from typing import Dict
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import STT_SILENCE_CHUNKS, TTS_CHUNK_MIN_CHARS, STT_API
-from app.conversation.controller import handle_user_text_stream
+from app.conversation.controller import handle_user_text_stream, handle_user_text
 from app.conversation.state import ConversationState
 from app.rag.retriever import Retriever
 
@@ -84,7 +86,44 @@ async def index() -> HTMLResponse:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "stt": "whisper", "tts": "edge-tts"}
+    from app.model_manager import get_model_manager
+    model_manager = get_model_manager()
+    return {
+        "status": "ok",
+        "stt": "whisper",
+        "tts": "edge-tts",
+        "llm_model": model_manager.get_current_model(),
+        "personaplex_available": model_manager.is_personaplex_available(),
+    }
+
+
+@app.get("/api/models")
+async def get_models():
+    """List available models and current selection."""
+    from app.model_manager import get_model_manager
+    model_manager = get_model_manager()
+    return {
+        "current": model_manager.get_current_model(),
+        "available": model_manager.list_available_models(),
+        "personaplex_available": model_manager.is_personaplex_available(),
+        "initialization_in_progress": model_manager.is_initialization_in_progress(),
+    }
+
+
+@app.post("/api/models/select")
+async def select_model(body: dict):
+    """Switch to a different model."""
+    from app.model_manager import get_model_manager
+    model_manager = get_model_manager()
+    model_key = body.get("model", "zephyr-7b")
+    success = model_manager.set_current_model(model_key)
+    if success:
+        return {
+            "status": "ok",
+            "current": model_manager.get_current_model(),
+            "info": model_manager.get_model_info(model_key),
+        }
+    return {"status": "error", "message": "Failed to select model"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
