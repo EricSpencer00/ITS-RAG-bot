@@ -108,8 +108,22 @@ If `HF_CHAT_MODEL` is unset the code falls back to your local Ollama server.
 You can also perform speech‑to‑text via an external service instead of
 `faster-whisper`.  Use the `STT_API` var to choose the provider:
 
-* `STT_API=hf` – call HuggingFace’s `openai/whisper-1` endpoint (uses the
-  same `HF_TOKEN`).
+* `STT_API=hf` – call HuggingFace’s speech‑to‑text endpoint.  The
+  specific model can be overridden with `HF_STT_MODEL` (default
+  `openai/whisper-1`).  However, **as of early 2026 there are no free HF
+  providers hosting any ASR models via the router**, so every attempt
+  will fail with a 404/StopIteration error unless you host your own
+  inference service or get special access to a gated model.  The code
+  uses the official `huggingface_hub.InferenceClient` SDK; when remote
+  STT fails it now surfaces a friendly message and suggests using a
+  local model or switching to `STT_API=openai`.
+  
+  Suggested “safe picks” such as `openai/whisper-small`,
+  `openai/whisper-base` or `openai/whisper-tiny` are **all in the same
+  boat** – we tried them and the router immediately raised
+  `StopIteration` (meaning no provider responded).  There’s nothing you
+  can do in the client to make those start working until a vendor turns
+  them on.
 * `STT_API=openai` – call OpenAI’s Whisper API (`OPENAI_API_KEY` must be set).
 
 No additional Python packages are required; the `RemoteSTT` helper lives in
