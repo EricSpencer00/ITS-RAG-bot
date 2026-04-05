@@ -24,8 +24,26 @@ let currentAssistantMessageDiv = null;
 let currentAssistantBubble = null;
 let currentAssistantRawText = "";
 let typingIndicator = null;
+let currentModel = "";
 
 const TARGET_SAMPLE_RATE = 16000;
+
+async function updateModelDisplay() {
+    try {
+        const resp = await fetch("/api/models");
+        const data = await resp.json();
+        // Extract just the model name (repo) and show short version
+        const model = data.current;
+        if (model.includes("/")) {
+            currentModel = model.split("/")[1]; // "tiiuae/falcon-7b" → "falcon-7b"
+        } else {
+            currentModel = model;
+        }
+        updateStatus();
+    } catch (e) {
+        console.error("Failed to fetch model info:", e);
+    }
+}
 
 function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -103,8 +121,20 @@ function appendToAssistantMessage(text) {
         currentAssistantMessageDiv = msgDiv;
         currentAssistantRawText = "";
     }
-    
+
     currentAssistantRawText += text;
+
+    // Check if this looks like an error message
+    const isError = currentAssistantRawText.toLowerCase().includes("error") ||
+                    currentAssistantRawText.toLowerCase().includes("trouble") ||
+                    currentAssistantRawText.toLowerCase().includes("encountered");
+
+    if (isError) {
+        currentAssistantBubble.classList.add("error");
+    } else {
+        currentAssistantBubble.classList.remove("error");
+    }
+
     currentAssistantBubble.innerHTML = linkifyText(currentAssistantRawText);
     scrollToBottom();
 }
@@ -157,31 +187,36 @@ function setConnection(connected) {
 }
 
 function updateStatus() {
+    let state = "Connected";
+    let stateDot = "connected";
+
     if (isListening) {
-        connectionStatus.textContent = "Listening...";
-        connectionDot.className = "status-dot listening";
+        state = "Listening...";
+        stateDot = "listening";
         startBtn.disabled = true;
         stopBtn.disabled = false;
         sendBtn.disabled = false;
     } else if (typingIndicator) {
-        connectionStatus.textContent = "Thinking...";
-        connectionDot.className = "status-dot thinking";
+        state = "Thinking...";
+        stateDot = "thinking";
         startBtn.disabled = false;
         stopBtn.disabled = true;
         sendBtn.disabled = false;
     } else if (isSpeaking) {
-        connectionStatus.textContent = "Speaking...";
-        connectionDot.className = "status-dot speaking";
+        state = "Speaking...";
+        stateDot = "speaking";
         startBtn.disabled = false;
         stopBtn.disabled = true;
         sendBtn.disabled = false;
     } else {
-        connectionStatus.textContent = "Connected";
-        connectionDot.className = "status-dot connected";
         startBtn.disabled = false;
         stopBtn.disabled = true;
         sendBtn.disabled = false;
     }
+
+    // Show state + model
+    connectionStatus.textContent = currentModel ? `${state} [${currentModel}]` : state;
+    connectionDot.className = `status-dot ${stateDot}`;
 }
 
 function setListening(listening) {
@@ -303,10 +338,11 @@ function connectWebSocket() {
 
     ws.onopen = () => {
         setConnection(true);
+        updateModelDisplay();
         // Send initial config
-        ws.send(JSON.stringify({ 
-            type: "config", 
-            audio_enabled: audioToggle.checked 
+        ws.send(JSON.stringify({
+            type: "config",
+            audio_enabled: audioToggle.checked
         }));
     };
 
@@ -507,6 +543,7 @@ modelSelect.addEventListener("change", async () => {
         const data = await resp.json();
         if (data.status === "ok") {
             console.log(`[Model] Switched to ${model}`);
+            updateModelDisplay(); // Update status to show new model
             // Optional: show user feedback
             const info = data.info;
             if (info) {

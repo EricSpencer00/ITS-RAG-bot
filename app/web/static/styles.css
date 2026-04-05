@@ -178,6 +178,14 @@ main {
     box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
 
+.message.assistant .bubble.error {
+    background-color: #ffe5e5;
+    border: 1px solid #d32f2f;
+    border-left: 3px solid #d32f2f;
+    color: #d32f2f;
+    font-weight: 500;
+}
+
 .meta-sources {
     font-size: 0.75rem;
     margin-top: 0.5rem;

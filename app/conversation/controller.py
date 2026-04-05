@@ -172,6 +172,7 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
     """Send a conversation to HuggingFace inference API.
 
     Tries chat_completion first, falls back to text_generation with formatted prompt.
+    Returns None or raises if truly unrecoverable.
     """
     from app.config import HF_TOKEN
     from app.model_manager import get_model_manager
@@ -194,43 +195,46 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
             choice = response.choices[0]
             if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
                 result = choice.message.content.strip()
-                return result if result else "I couldn't generate a response. Please try again."
+                if result:
+                    return result
         result = str(response).strip() if response else ""
-        return result if result else "I couldn't generate a response. Please try again."
+        if result:
+            return result
     except Exception as e:
         chat_error = str(e).lower()
+        print(f"[HF Chat] chat_completion failed: {e}")
+
         # If chat fails, try text_generation with formatted prompt
-        if "not supported" in chat_error or "supported task" in chat_error or "404" not in chat_error:
-            try:
-                # Format messages as a simple prompt for text_generation
-                prompt_lines = []
-                for m in messages:
-                    role = m.get("role", "user")
-                    content = m.get("content", "")
-                    prompt_lines.append(f"{role}: {content}")
-                prompt = "\n".join(prompt_lines)
+        if "not supported" not in chat_error and "supported task" not in chat_error:
+            print(f"[HF Chat] Not a 'not supported' error, re-raising")
+            raise
 
-                generated = client.text_generation(
-                    prompt,
-                    model=model,
-                    max_new_tokens=OLLAMA_LLM_NUM_PREDICT,
-                    temperature=OLLAMA_TEMPERATURE,
-                )
-                result = str(generated).strip() if generated else ""
-                return result if result else "I couldn't generate a response. Please try again."
-            except Exception as e2:
-                print(f"[HF Chat Fallback Error] {str(e2)}")
-                return f"I encountered an error. Please try a different model or try again."
+        try:
+            print(f"[HF Chat] Trying text_generation fallback...")
+            # Format messages as a simple prompt for text_generation
+            prompt_lines = []
+            for m in messages:
+                role = m.get("role", "user")
+                content = m.get("content", "")
+                prompt_lines.append(f"{role}: {content}")
+            prompt = "\n".join(prompt_lines)
 
-        # If both fail, raise the original error
-        if "404" in chat_error or "not found" in chat_error:
-            raise RuntimeError(
-                f"HF chat model '{model}' not available; received 404. "
-                "Check HF_TOKEN or try another model."
-            ) from e
+            generated = client.text_generation(
+                prompt,
+                model=model,
+                max_new_tokens=OLLAMA_LLM_NUM_PREDICT,
+                temperature=OLLAMA_TEMPERATURE,
+            )
+            result = str(generated).strip() if generated else ""
+            if result:
+                print(f"[HF Chat] text_generation succeeded")
+                return result
+        except Exception as e2:
+            print(f"[HF Chat] text_generation also failed: {e2}")
+            raise RuntimeError(f"HF inference failed for model '{model}': {str(e2)[:100]}") from e2
 
-        print(f"[HF Chat Error] {chat_error}")
-        return "I encountered an error. Please try a different model or try again."
+    # If we get here, HF failed to produce output
+    raise RuntimeError(f"HF inference produced no output for model '{model}'")
 
 
 async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
@@ -261,11 +265,14 @@ async def _hf_chat_stream(messages: List[Dict[str, str]]) -> AsyncGenerator[str,
         text = _hf_chat(messages)
         if text:
             yield text
+        else:
+            raise RuntimeError("HF returned empty response")
     except StopIteration:
         # HF client may raise StopIteration; convert to proper error handling
-        yield "I encountered an issue processing that request. Please try again."
+        raise RuntimeError("HF StopIteration: no valid response") from None
     except Exception as e:
-        yield f"Error: {str(e)}"
+        # Re-raise so caller can handle fallback
+        raise RuntimeError(f"HF chat stream error: {str(e)}") from e
 
 
 # ── Diagnostic hint injected when Lu should ask a question ────────────
@@ -343,21 +350,22 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
                 yield {"type": "token", "content": token}
             response_generated = True
         except Exception as e:
-            print(f"[Controller Streaming] HF chat failed: {e}, falling back to Ollama")
+            print(f"[Streaming] HF chat failed: {e}, falling back to Ollama")
             full_response = []  # Reset for Ollama attempt
 
     # Fall back to Ollama if HF failed or wasn't attempted
     if not response_generated:
         try:
+            print(f"[Streaming] Using Ollama fallback: {OLLAMA_MODEL}")
             async for token in _ollama_chat_stream(messages):
                 full_response.append(token)
                 yield {"type": "token", "content": token}
             response_generated = True
         except Exception as e:
-            error_msg = f"I'm having trouble with inference right now. Please try again."
+            error_msg = f"I'm having trouble with inference services right now. Please try again."
             full_response.append(error_msg)
             yield {"type": "token", "content": error_msg}
-            print(f"[Controller Streaming] Both HF and Ollama failed: {e}")
+            print(f"[Streaming] Both HF and Ollama failed: {e}")
 
     state.add_turn("assistant", "".join(full_response))
 
@@ -413,13 +421,14 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
             answer = _hf_chat(messages)
         except Exception as e:
             print(f"[Controller] HF chat failed: {e}, falling back to Ollama")
-            answer = None
 
     if not answer:
         try:
+            print(f"[Controller] Using Ollama fallback: {OLLAMA_MODEL}")
             answer = _ollama_chat(messages)
         except Exception as e:
-            answer = f"I'm having trouble reaching both HF and local inference. Error: {str(e)[:50]}"
+            print(f"[Controller] Ollama chat also failed: {e}")
+            answer = f"I'm having trouble reaching inference services. Error: {str(e)[:80]}"
 
     response = answer.strip() if answer else "Sorry, I couldn't generate a response. Try again?"
     state.add_turn("assistant", response)
