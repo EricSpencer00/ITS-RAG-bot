@@ -1,6 +1,8 @@
 """Model selection and management for conversation LLM."""
 
 from typing import Optional, List
+from functools import lru_cache
+import hashlib
 
 
 # Recommended HuggingFace models for ITS support chatbot
@@ -57,6 +59,8 @@ class ModelManager:
         self.current_model = self._resolve_model(initial_model)
         self._initialization_in_progress = False
         self._personaplex_available = False
+        self._response_cache = {}  # Simple in-memory cache
+        self._cache_max_size = 100  # Keep it small to avoid memory issues
 
     def _resolve_model(self, model_key: str) -> str:
         """Resolve short name or full repo path to full HF repo path."""
@@ -106,6 +110,28 @@ class ModelManager:
     def is_initialization_in_progress(self) -> bool:
         """Check if initialization is happening."""
         return self._initialization_in_progress
+
+    def get_cached_response(self, prompt: str) -> Optional[str]:
+        """Get a cached response for a prompt, or None if not cached."""
+        key = self._make_cache_key(prompt)
+        return self._response_cache.get(key)
+
+    def cache_response(self, prompt: str, response: str) -> None:
+        """Cache a response for a prompt."""
+        # Only cache common/short prompts to save memory
+        if len(prompt) < 200 and len(response) < 1000:
+            key = self._make_cache_key(prompt)
+            # Simple LRU: if cache is full, clear oldest 20 items
+            if len(self._response_cache) >= self._cache_max_size:
+                items_to_remove = list(self._response_cache.keys())[:20]
+                for k in items_to_remove:
+                    del self._response_cache[k]
+            self._response_cache[key] = response
+
+    @staticmethod
+    def _make_cache_key(prompt: str) -> str:
+        """Create a cache key from a prompt."""
+        return hashlib.md5(prompt.encode()).hexdigest()
 
 
 # Global instance

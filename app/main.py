@@ -128,9 +128,6 @@ async def select_model(body: dict):
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
-# Splits on sentence end (.!?) or hard comma-clause (,  at 60+ chars)
-_tts_break_re = re.compile(r'(?<=[.!?])\s+|(?<=,)\s+')
-
 _url_re = re.compile(r'https?://\S+')
 
 
@@ -316,6 +313,10 @@ async def ws_audio(websocket: WebSocket) -> None:
                     await process_response_stream(text)
 
             elif msg_type == "audio":
+                # Legacy: server-side STT for clients that still send PCM chunks.
+                # The web UI now uses the browser's Web Speech API instead.
+                if stt is None:
+                    continue
                 b64_audio = payload.get("data", "")
                 if not b64_audio:
                     continue

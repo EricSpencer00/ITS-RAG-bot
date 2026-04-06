@@ -372,6 +372,18 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
 
 def handle_user_text(state: ConversationState, text: str, retriever: Retriever) -> Dict[str, str]:
     """Synchronous (non-streaming) handler — used by POST /api/text."""
+    from app.model_manager import get_model_manager
+
+    model_manager = get_model_manager()
+
+    # Check cache first for quick responses to common questions
+    cached_response = model_manager.get_cached_response(text)
+    if cached_response:
+        print(f"[Controller] Cache hit for: {text[:50]}")
+        state.add_turn("user", text)
+        state.add_turn("assistant", cached_response)
+        return {"response": cached_response, "intent": INTENT_TROUBLESHOOT, "sources": [], "cached": True}
+
     if requires_private_data(text):
         refusal = "I can only use public ITS information in this PoC. Please contact the ITS Service Desk for requests that require private or internal data."
         state.add_turn("assistant", refusal)
@@ -432,4 +444,9 @@ def handle_user_text(state: ConversationState, text: str, retriever: Retriever) 
 
     response = answer.strip() if answer else "Sorry, I couldn't generate a response. Try again?"
     state.add_turn("assistant", response)
+
+    # Cache successful responses for future queries
+    if not response.startswith("Sorry") and not response.startswith("I'm having trouble"):
+        model_manager.cache_response(text, response)
+
     return {"response": response, "intent": intent, "sources": docs}
