@@ -55,43 +55,60 @@ _retriever: Retriever | None = None
 
 
 def _personaplex_supported() -> tuple[bool, str]:
-    """Decide whether PersonaPlex can plausibly run on this host.
+    """Decide whether the full-duplex speech engine can run on this host.
 
-    Returns (supported, reason). PP segfaults on this user's M1 in two
-    distinct ways depending on device: MPS crashes inside moshi's native
-    codec, and CPU crashes inside torch ops *only when* faster-whisper has
-    already been loaded in the same process (the OpenMP runtimes from
-    libtorch and CTranslate2 conflict on macOS). Either path takes the
-    whole uvicorn worker down before any error message reaches the UI.
-    Until we either run PP in a subprocess or find a CUDA box, gate the
-    feature behind an explicit support check so the user gets a clear
-    error in the chat instead of a crash report.
+    Returns (supported, reason). We prefer Kyutai's ``moshi-mlx`` (the
+    official MLX/Metal port of moshi, which PersonaPlex is a fine-tune of)
+    when it's importable, because it runs in a subprocess and uses MLX
+    instead of torch — neither of the two segfault paths that bit us with
+    NVIDIA's personaplex.py applies. If moshi-mlx is missing we fall back
+    to the old CUDA-only personaplex.py path; on a non-CUDA, non-macOS
+    host the operator can opt in via ``PERSONAPLEX_ALLOW_CPU=1``.
     """
     if not PERSONAPLEX_ENABLED:
         return False, "PersonaPlex is disabled via PERSONAPLEX_ENABLED=false."
+
+    # Preferred path: Kyutai moshi-mlx in a subprocess (Apple Silicon).
+    try:
+        import moshi_mlx  # noqa: F401, WPS433
+        return True, ""
+    except ImportError:
+        pass
+
+    # Fallback: NVIDIA personaplex.py — CUDA only.
     try:
         import torch  # noqa: WPS433
     except Exception as exc:  # pragma: no cover - torch should always be present
         return False, f"PyTorch is not importable: {exc}"
     if torch.cuda.is_available():
         return True, ""
-    # No CUDA. macOS + CPU is known to segfault in this codebase.
     if sys.platform == "darwin":
         return False, (
-            "PersonaPlex requires a CUDA GPU. On Apple Silicon the moshi "
-            "backend either segfaults on MPS or conflicts with the OpenMP "
-            "runtime that faster-whisper loads, taking the server down. "
-            "Use the Cascaded pipeline instead."
+            "Real-time speech-to-speech requires either Kyutai moshi-mlx "
+            "(install with `pip install moshi-mlx`) on Apple Silicon, or a "
+            "CUDA GPU. The legacy NVIDIA personaplex.py path segfaults on "
+            "macOS. Use the Cascaded pipeline if neither is available."
         )
-    # Linux/CPU might work but real-time inference is impractical with a
-    # 7B speech LM. Allow it but make the operator opt in.
     if os.environ.get("PERSONAPLEX_ALLOW_CPU", "").lower() not in ("1", "true", "yes"):
         return False, (
-            "PersonaPlex is gated off on non-CUDA hosts because the 7B speech "
-            "LM is not real-time on CPU. Set PERSONAPLEX_ALLOW_CPU=1 to "
-            "force-enable it for offline experimentation."
+            "PersonaPlex is gated off on non-CUDA hosts because the 7B "
+            "speech LM is not real-time on CPU. Set PERSONAPLEX_ALLOW_CPU=1 "
+            "to force-enable the legacy path for offline experimentation."
         )
     return True, ""
+
+
+def _resolve_realtime_engine() -> str:
+    """Return which realtime-speech backend the WS handler should use.
+
+    ``"moshi_mlx"`` → app.voice.moshi_mlx_engine
+    ``"personaplex"`` → app.voice.personaplex (CUDA-only NVIDIA fork)
+    """
+    try:
+        import moshi_mlx  # noqa: F401, WPS433
+        return "moshi_mlx"
+    except ImportError:
+        return "personaplex"
 
 
 def get_stt():
@@ -451,13 +468,21 @@ async def ws_personaplex(websocket: WebSocket) -> None:
         await websocket.close()
         return
 
-    # Lazy import — keeps startup cheap and surfaces missing deps cleanly
+    backend = _resolve_realtime_engine()  # "moshi_mlx" | "personaplex"
+    print(f"[WS/personaplex {session_id[:8]}] backend={backend}")
+
+    # Lazy imports — keep startup cheap and isolate import-time failures.
+    engine = None
+    pp_session = None  # only used by the legacy NVIDIA path
     try:
-        from app.voice.personaplex import get_engine, PersonaPlexSession
+        if backend == "moshi_mlx":
+            from app.voice.moshi_mlx_engine import get_engine
+        else:
+            from app.voice.personaplex import get_engine, PersonaPlexSession  # noqa: F401
     except Exception as e:
         await websocket.send_json({
             "type": "error",
-            "message": f"PersonaPlex module unavailable: {e}. Check sphn / moshi / huggingface-hub versions.",
+            "message": f"Realtime speech engine unavailable: {e}",
         })
         await websocket.close()
         return
@@ -467,21 +492,25 @@ async def ws_personaplex(websocket: WebSocket) -> None:
     try:
         engine = await get_engine()
     except Exception as e:
-        await websocket.send_json({"type": "error", "message": f"PersonaPlex init failed: {e}"})
+        await websocket.send_json({
+            "type": "error",
+            "message": f"Realtime speech engine init failed: {e}",
+        })
         await websocket.close()
         return
 
-    await websocket.send_json({"type": "status", "message": "ready"})
+    if backend == "personaplex":
+        pp_session = PersonaPlexSession(
+            session_id=session_id,
+            voice_prompt=DEFAULT_VOICE_PROMPT,
+            text_prompt=SYSTEM_PROMPT or DEFAULT_TEXT_PROMPT,
+        )
 
-    session = PersonaPlexSession(
-        session_id=session_id,
-        voice_prompt=DEFAULT_VOICE_PROMPT,
-        text_prompt=SYSTEM_PROMPT or DEFAULT_TEXT_PROMPT,
-    )
+    await websocket.send_json({"type": "status", "message": "ready"})
 
     import numpy as np
 
-    target_sr = engine.sample_rate  # PersonaPlex native rate (e.g. 24000 Hz)
+    target_sr = engine.sample_rate  # both engines expose this
 
     incoming: asyncio.Queue = asyncio.Queue()
     alive = True
@@ -556,13 +585,21 @@ async def ws_personaplex(websocket: WebSocket) -> None:
 
     read_task = asyncio.create_task(read_loop())
     try:
-        await engine.handle_conversation(
-            session=session,
-            send_audio=send_audio,
-            send_text=send_text,
-            receive_audio=receive_audio,
-            is_alive=is_alive,
-        )
+        if backend == "moshi_mlx":
+            await engine.handle_conversation(
+                send_audio=send_audio,
+                send_text=send_text,
+                receive_pcm=receive_audio,
+                is_alive=is_alive,
+            )
+        else:
+            await engine.handle_conversation(
+                session=pp_session,
+                send_audio=send_audio,
+                send_text=send_text,
+                receive_audio=receive_audio,
+                is_alive=is_alive,
+            )
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
