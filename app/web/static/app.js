@@ -21,6 +21,13 @@ let ppAudioContext = null;
 let ppSourceNode = null;
 let ppProcessorNode = null;
 let ppActive = false;
+// Cascaded-mode capture state (server-side Whisper STT via /ws/audio)
+let cascStream = null;
+let cascAudioContext = null;
+let cascSourceNode = null;
+let cascProcessorNode = null;
+let cascActive = false;
+const CASCADED_TARGET_SR = 16000;
 let isListening = false;
 let isSpeaking = false;
 let currentAudio = null;
@@ -130,8 +137,7 @@ function initSpeechRecognition() {
 
 function toggleListening() {
     if (currentEngine === "personaplex") {
-        // PersonaPlex uses full-duplex capture over its own WebSocket,
-        // not the Web Speech API. Toggle the MediaRecorder pipeline instead.
+        // PersonaPlex uses full-duplex capture over its own WebSocket.
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             alert("PersonaPlex is still loading. Please wait for the status to read 'Ready'.");
             return;
@@ -144,6 +150,23 @@ function toggleListening() {
         return;
     }
 
+    // Cascaded mode: prefer server-side Whisper STT (over /ws/audio).
+    // The browser's Web Speech API requires Google's cloud speech service,
+    // which fails with "network" errors on offline / firewalled / VPN setups
+    // and tears the recording overlay down within 100 ms. Capturing raw PCM
+    // and letting the server's Whisper instance transcribe is reliable and
+    // works fully offline.
+    const ContextClass = window.AudioContext || window.webkitAudioContext;
+    if (ContextClass && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        if (cascActive) {
+            stopCascadedCapture();
+        } else {
+            startCascadedCapture();
+        }
+        return;
+    }
+
+    // Last-resort fallback: browser Web Speech API.
     if (!recognition) {
         alert("Speech recognition not supported. Try Chrome or Edge.");
         return;
@@ -417,6 +440,7 @@ function connectWebSocket() {
         ws = null;
     }
     stopPersonaPlexCapture();
+    stopCascadedCapture();
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}${wsPath()}`);
@@ -435,6 +459,7 @@ function connectWebSocket() {
     ws.onclose = () => {
         setConnection(false);
         stopPersonaPlexCapture();
+        stopCascadedCapture();
         if (isListening && recognition) recognition.stop();
         setTimeout(connectWebSocket, 3000);
     };
@@ -447,6 +472,10 @@ function connectWebSocket() {
                 partialEl.classList.add("visible");
                 break;
             case "final_text":
+                // Server-side Whisper detected end-of-utterance and is now
+                // about to run the LLM. Stop streaming mic audio so we don't
+                // keep buffering during inference.
+                if (cascActive) stopCascadedCapture();
                 partialEl.textContent = "";
                 partialEl.classList.remove("visible");
                 showMessages();
@@ -580,6 +609,128 @@ async function startPersonaPlexCapture() {
     }
 }
 
+// ── Cascaded mode capture (server-side Whisper STT) ─────────────────
+//
+// Captures Float32 PCM via AudioContext, downsamples to 16 kHz mono Int16,
+// and ships it to /ws/audio under {type:"audio"}. The server already does
+// VAD + Whisper transcription and replies with {type:"final_text"}.
+async function startCascadedCapture() {
+    if (cascActive) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("Not connected to the server yet — try again in a moment.");
+        return;
+    }
+    try {
+        cascStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            },
+        });
+
+        const ContextClass = window.AudioContext || window.webkitAudioContext;
+        // Try native 16 kHz first; if the browser refuses we'll resample.
+        try {
+            cascAudioContext = new ContextClass({ sampleRate: CASCADED_TARGET_SR });
+        } catch (_) {
+            cascAudioContext = new ContextClass();
+        }
+        if (cascAudioContext.state === "suspended") {
+            try { await cascAudioContext.resume(); } catch (_) {}
+        }
+
+        const srcRate = cascAudioContext.sampleRate;
+        cascSourceNode = cascAudioContext.createMediaStreamSource(cascStream);
+
+        const bufferSize = 4096;
+        cascProcessorNode = cascAudioContext.createScriptProcessor(bufferSize, 1, 1);
+
+        cascProcessorNode.onaudioprocess = (ev) => {
+            if (!cascActive) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const input = ev.inputBuffer.getChannelData(0);
+
+            // Downsample to 16 kHz if the AudioContext didn't honor our request.
+            let mono = input;
+            if (srcRate !== CASCADED_TARGET_SR) {
+                const ratio = CASCADED_TARGET_SR / srcRate;
+                const outLen = Math.max(1, Math.floor(input.length * ratio));
+                const out = new Float32Array(outLen);
+                for (let i = 0; i < outLen; i++) {
+                    const srcIdx = i / ratio;
+                    const lo = Math.floor(srcIdx);
+                    const hi = Math.min(lo + 1, input.length - 1);
+                    const frac = srcIdx - lo;
+                    out[i] = input[lo] * (1 - frac) + input[hi] * frac;
+                }
+                mono = out;
+            }
+
+            const int16 = new Int16Array(mono.length);
+            for (let i = 0; i < mono.length; i++) {
+                const s = Math.max(-1, Math.min(1, mono[i]));
+                int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            const bytes = new Uint8Array(int16.buffer);
+            let bin = "";
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            ws.send(JSON.stringify({ type: "audio", data: btoa(bin) }));
+        };
+
+        cascSourceNode.connect(cascProcessorNode);
+        const muted = cascAudioContext.createGain();
+        muted.gain.value = 0;
+        cascProcessorNode.connect(muted);
+        muted.connect(cascAudioContext.destination);
+
+        cascActive = true;
+        isListening = true;
+        micBtn.classList.add("recording");
+        recordingOverlay.classList.add("active");
+        recordingText.textContent = "Listening…";
+        partialEl.textContent = "";
+        partialEl.classList.remove("visible");
+        updateStatus();
+    } catch (e) {
+        console.error("Cascaded capture error:", e);
+        if (e && e.name === "NotAllowedError") {
+            alert("Microphone access denied. Please allow mic access in your browser settings.");
+        } else {
+            createMessage("assistant", "Error: mic access failed — " + (e && e.message ? e.message : e));
+        }
+        stopCascadedCapture();
+    }
+}
+
+function stopCascadedCapture() {
+    cascActive = false;
+    if (cascProcessorNode) {
+        try { cascProcessorNode.disconnect(); } catch (_) {}
+        cascProcessorNode.onaudioprocess = null;
+        cascProcessorNode = null;
+    }
+    if (cascSourceNode) {
+        try { cascSourceNode.disconnect(); } catch (_) {}
+        cascSourceNode = null;
+    }
+    if (cascAudioContext) {
+        try { cascAudioContext.close(); } catch (_) {}
+        cascAudioContext = null;
+    }
+    if (cascStream) {
+        cascStream.getTracks().forEach(t => t.stop());
+        cascStream = null;
+    }
+    isListening = false;
+    micBtn.classList.remove("recording");
+    recordingOverlay.classList.remove("active");
+    partialEl.textContent = "";
+    partialEl.classList.remove("visible");
+    updateStatus();
+}
+
 function stopPersonaPlexCapture() {
     ppActive = false;
     if (ppProcessorNode) {
@@ -633,6 +784,8 @@ micBtn.addEventListener("click", toggleListening);
 recordingStop.addEventListener("click", () => {
     if (currentEngine === "personaplex") {
         stopPersonaPlexCapture();
+    } else if (cascActive) {
+        stopCascadedCapture();
     } else if (recognition && isListening) {
         recognition.stop();
     }
