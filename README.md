@@ -1,7 +1,9 @@
 # ITS Voice Bot
 
 Voice-first RAG chatbot for Loyola ITS support, with an optional full-duplex
-voice mode powered by NVIDIA PersonaPlex.
+voice mode powered by moshi-mix TTS.
+
+![demo.png](demo.png)
 
 ## Requirements
 
