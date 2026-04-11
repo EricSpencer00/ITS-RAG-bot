@@ -425,13 +425,17 @@ async def ws_personaplex(websocket: WebSocket) -> None:
         text_prompt=SYSTEM_PROMPT or DEFAULT_TEXT_PROMPT,
     )
 
+    import numpy as np
+
+    target_sr = engine.sample_rate  # PersonaPlex native rate (e.g. 24000 Hz)
+
     incoming: asyncio.Queue = asyncio.Queue()
     alive = True
 
     async def is_alive() -> bool:
         return alive
 
-    async def receive_audio() -> Optional[bytes]:
+    async def receive_audio():
         try:
             return await asyncio.wait_for(incoming.get(), timeout=0.1)
         except asyncio.TimeoutError:
@@ -447,6 +451,32 @@ async def ws_personaplex(websocket: WebSocket) -> None:
     async def send_text(text: str) -> None:
         await websocket.send_json({"type": "token", "content": text})
 
+    def _decode_pcm_payload(payload: dict) -> Optional["np.ndarray"]:
+        """Decode a client `pcm` message into a mono float32 array at target_sr."""
+        data = payload.get("data", "")
+        if not data:
+            return None
+        src_sr = int(payload.get("sample_rate", target_sr))
+        try:
+            raw = base64.b64decode(data)
+        except Exception:
+            return None
+        if not raw:
+            return None
+        pcm_i16 = np.frombuffer(raw, dtype=np.int16)
+        if pcm_i16.size == 0:
+            return None
+        pcm = pcm_i16.astype(np.float32) / 32768.0
+        if src_sr != target_sr:
+            # Linear interpolation resample — good enough for speech LLM input.
+            new_len = max(1, int(round(pcm.shape[-1] * target_sr / src_sr)))
+            pcm = np.interp(
+                np.linspace(0, pcm.shape[-1] - 1, new_len, dtype=np.float32),
+                np.arange(pcm.shape[-1], dtype=np.float32),
+                pcm,
+            ).astype(np.float32)
+        return pcm
+
     async def read_loop() -> None:
         nonlocal alive
         try:
@@ -454,13 +484,16 @@ async def ws_personaplex(websocket: WebSocket) -> None:
                 msg = await websocket.receive_text()
                 payload = json.loads(msg)
                 mtype = payload.get("type")
-                if mtype == "audio":
-                    data = payload.get("data", "")
-                    if data:
-                        await incoming.put(base64.b64decode(data))
+                if mtype == "pcm":
+                    pcm = _decode_pcm_payload(payload)
+                    if pcm is not None:
+                        await incoming.put(pcm)
                 elif mtype == "stop":
                     alive = False
                     break
+                # Legacy `audio` (Opus/WebM) messages are no longer accepted —
+                # the client now sends raw PCM to avoid container-format
+                # mismatches that would crash sphn.OpusStreamReader.
         except WebSocketDisconnect:
             alive = False
         except Exception as e:

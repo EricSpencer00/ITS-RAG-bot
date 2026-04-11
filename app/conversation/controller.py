@@ -203,12 +203,15 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
         if response and hasattr(response, 'choices') and len(response.choices) > 0:
             choice = response.choices[0]
             if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                result = choice.message.content.strip()
+                result = (choice.message.content or "").strip()
                 if result:
                     return result
-        result = str(response).strip() if response else ""
-        if result:
-            return result
+        # No usable .choices[].message.content → treat as an HF failure and
+        # let the caller fall back to Ollama. (The old code did
+        # `str(response).strip()` here, which would happily return the repr
+        # of the response object — garbage text that then got mixed with the
+        # real Ollama answer in the UI.)
+        raise RuntimeError("HF chat_completion returned no usable content")
     except Exception as e:
         chat_error = str(e).lower()
         print(f"[HF Chat] chat_completion failed: {e}")
@@ -356,16 +359,28 @@ async def handle_user_text_stream(state: ConversationState, text: str, retriever
     full_response = []
     response_generated = False
 
-    # Try HF first, fall back to Ollama
+    # Try HF first, fall back to Ollama.
+    #
+    # IMPORTANT: We buffer HF tokens entirely before emitting any to the
+    # client. _hf_chat is non-streaming (one big chunk), and we previously
+    # emitted that chunk to the UI before deciding whether HF had actually
+    # succeeded — so a half-broken HF response could reach the bubble and
+    # then the Ollama fallback would append a second answer onto the same
+    # bubble, giving users a concatenated "response1 response2" message.
     if use_hf:
         try:
+            hf_buffer = []
             async for token in _hf_chat_stream(messages):
-                full_response.append(token)
-                yield {"type": "token", "content": token}
+                hf_buffer.append(token)
+            buffered = "".join(hf_buffer).strip()
+            if not buffered:
+                raise RuntimeError("HF returned empty response")
+            full_response.append(buffered)
+            yield {"type": "token", "content": buffered}
             response_generated = True
         except Exception as e:
             print(f"[Streaming] HF chat failed: {e}, falling back to Ollama")
-            full_response = []  # Reset for Ollama attempt
+            full_response = []  # Nothing was emitted to the client — safe to retry
 
     # Fall back to Ollama if HF failed or wasn't attempted
     if not response_generated:

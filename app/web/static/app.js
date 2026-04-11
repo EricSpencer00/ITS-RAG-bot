@@ -16,8 +16,11 @@ const recordingStop = document.getElementById("recording-stop");
 
 let ws = null;
 let currentEngine = "cascaded"; // "cascaded" | "personaplex"
-let ppRecorder = null;
 let ppStream = null;
+let ppAudioContext = null;
+let ppSourceNode = null;
+let ppProcessorNode = null;
+let ppActive = false;
 let isListening = false;
 let isSpeaking = false;
 let currentAudio = null;
@@ -133,7 +136,7 @@ function toggleListening() {
             alert("PersonaPlex is still loading. Please wait for the status to read 'Ready'.");
             return;
         }
-        if (ppRecorder) {
+        if (ppActive) {
             stopPersonaPlexCapture();
         } else {
             startPersonaPlexCapture();
@@ -495,31 +498,76 @@ function connectWebSocket() {
 }
 
 // ── PersonaPlex full-duplex mic capture ──────────────────────────────
+//
+// We deliberately do NOT use MediaRecorder here. MediaRecorder emits
+// WebM- or Ogg-wrapped Opus, but the server pipes incoming bytes through
+// sphn.OpusStreamReader, which expects raw Opus packets — the very first
+// WebM header would trip a "channel closed" error and silently tear down
+// the WS. Instead we capture raw Float32 PCM via AudioContext, downconvert
+// to Int16, and ship it as base64 under {type:"pcm"}. The server handles
+// the resample to PersonaPlex's native 24 kHz.
 async function startPersonaPlexCapture() {
-    if (ppRecorder) return;
+    if (ppActive) return;
     try {
-        ppStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : "audio/ogg;codecs=opus";
-        ppRecorder = new MediaRecorder(ppStream, { mimeType: mime });
-        ppRecorder.ondataavailable = async (ev) => {
-            if (!ev.data || ev.data.size === 0) return;
+        ppStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            },
+        });
+
+        const ContextClass = window.AudioContext || window.webkitAudioContext;
+        // Prefer 24 kHz to match mimi, but some browsers ignore sampleRate
+        // on construction — that's OK, the server resamples whatever we send.
+        try {
+            ppAudioContext = new ContextClass({ sampleRate: 24000 });
+        } catch (_) {
+            ppAudioContext = new ContextClass();
+        }
+        if (ppAudioContext.state === "suspended") {
+            try { await ppAudioContext.resume(); } catch (_) {}
+        }
+
+        const srcRate = ppAudioContext.sampleRate;
+        ppSourceNode = ppAudioContext.createMediaStreamSource(ppStream);
+
+        // ScriptProcessorNode is deprecated but universally supported and
+        // works without bundling an AudioWorklet module. Buffer size 2048
+        // at 24 kHz ≈ 85 ms per chunk, low enough for conversational latency.
+        const bufferSize = 2048;
+        ppProcessorNode = ppAudioContext.createScriptProcessor(bufferSize, 1, 1);
+
+        ppProcessorNode.onaudioprocess = (ev) => {
+            if (!ppActive) return;
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            const buf = await ev.data.arrayBuffer();
-            const bytes = new Uint8Array(buf);
+            const input = ev.inputBuffer.getChannelData(0);
+            const int16 = new Int16Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+                const s = Math.max(-1, Math.min(1, input[i]));
+                int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            const bytes = new Uint8Array(int16.buffer);
+            // btoa on a large binary string can be slow; this is fine for 2048 samples.
             let bin = "";
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-            const b64 = btoa(bin);
-            ws.send(JSON.stringify({ type: "audio", data: b64 }));
+            ws.send(JSON.stringify({
+                type: "pcm",
+                data: btoa(bin),
+                sample_rate: srcRate,
+            }));
         };
-        ppRecorder.onstop = () => {
-            isListening = false;
-            micBtn.classList.remove("recording");
-            recordingOverlay.classList.remove("active");
-            updateStatus();
-        };
-        ppRecorder.start(100); // 100ms chunks
+
+        ppSourceNode.connect(ppProcessorNode);
+        // ScriptProcessor needs to reach destination to actually run its callback;
+        // we route it through a muted gain so the user doesn't hear their own mic.
+        const muted = ppAudioContext.createGain();
+        muted.gain.value = 0;
+        ppProcessorNode.connect(muted);
+        muted.connect(ppAudioContext.destination);
+
+        ppActive = true;
         isListening = true;
         micBtn.classList.add("recording");
         recordingOverlay.classList.add("active");
@@ -528,17 +576,24 @@ async function startPersonaPlexCapture() {
     } catch (e) {
         console.error("PersonaPlex capture error:", e);
         createMessage("assistant", "Error: mic access failed for PersonaPlex — " + e.message);
-        isListening = false;
-        micBtn.classList.remove("recording");
-        recordingOverlay.classList.remove("active");
-        updateStatus();
+        stopPersonaPlexCapture();
     }
 }
 
 function stopPersonaPlexCapture() {
-    if (ppRecorder) {
-        try { ppRecorder.stop(); } catch (_) {}
-        ppRecorder = null;
+    ppActive = false;
+    if (ppProcessorNode) {
+        try { ppProcessorNode.disconnect(); } catch (_) {}
+        ppProcessorNode.onaudioprocess = null;
+        ppProcessorNode = null;
+    }
+    if (ppSourceNode) {
+        try { ppSourceNode.disconnect(); } catch (_) {}
+        ppSourceNode = null;
+    }
+    if (ppAudioContext) {
+        try { ppAudioContext.close(); } catch (_) {}
+        ppAudioContext = null;
     }
     if (ppStream) {
         ppStream.getTracks().forEach(t => t.stop());

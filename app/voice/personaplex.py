@@ -295,7 +295,7 @@ class PersonaPlexEngine:
         session: PersonaPlexSession,
         send_audio: Callable[[bytes], Awaitable[None]],
         send_text: Callable[[str], Awaitable[None]],
-        receive_audio: Callable[[], Awaitable[Optional[bytes]]],
+        receive_audio: Callable[[], Awaitable[Optional["np.ndarray"]]],
         is_alive: Callable[[], Awaitable[bool]],
     ) -> None:
         """
@@ -353,10 +353,15 @@ class PersonaPlexEngine:
             else:
                 self._lm_gen.text_prompt_tokens = None
                 
-            # Create Opus streams
+            # Create Opus stream for OUTGOING audio only. The incoming side
+            # now receives raw PCM directly from the browser (via an
+            # AudioContext capture pipeline) — sending WebM/Ogg-wrapped
+            # Opus chunks through sphn.OpusStreamReader caused the decoder
+            # to raise a "channel closed" error on the very first frame,
+            # which in turn tripped session.close_requested and silently
+            # tore down the websocket.
             opus_writer = sphn.OpusStreamWriter(self._mimi.sample_rate)
-            opus_reader = sphn.OpusStreamReader(self._mimi.sample_rate)
-            
+
             # Reset streaming state
             self._mimi.reset_streaming()
             self._other_mimi.reset_streaming()
@@ -371,16 +376,22 @@ class PersonaPlexEngine:
             all_pcm_data = None
             
             async def process_incoming_audio():
-                """Receive and buffer incoming audio."""
+                """Receive and buffer incoming PCM frames from the client.
+
+                `receive_audio` now returns a 1D float32 numpy array at the
+                mimi sample rate (resampling/decoding happens in main.py),
+                or None on a receive timeout. No Opus decoding here.
+                """
                 nonlocal all_pcm_data
-                
+
                 print(f"[Session {session.session_id[:8]}] - Starting incoming audio processor")
                 frames_received = 0
-                silence_count = 0  
-                # Wait for up to 10 seconds of silence before giving up
-                # Loop runs at ~100-200Hz depending on sleep
-                MAX_SILENCE_LOOPS = 5000  
-                
+                silence_count = 0
+                # ~30 seconds of genuine silence (5ms sleep × 6000) before
+                # giving up. Was previously 10s which was too aggressive for
+                # real conversation pauses.
+                MAX_SILENCE_LOOPS = 6000
+
                 while session.is_active and not session.close_requested:
                     audio_data = await receive_audio()
                     if audio_data is None:
@@ -389,39 +400,24 @@ class PersonaPlexEngine:
                             print(f"[Session {session.session_id[:8]}] - No audio for {MAX_SILENCE_LOOPS} loops, stopping input")
                             session.close_requested = True
                             break
-                        await asyncio.sleep(0.005) # Sleep 5ms to avoid CPU spinning
+                        await asyncio.sleep(0.005)
                         continue
-                    
-                    silence_count = 0  # Reset silence counter on data
+
+                    silence_count = 0
                     frames_received += 1
-                    print(f"[Session {session.session_id[:8]}] - Received frame #{frames_received}: {len(audio_data)} bytes")
-                    if frames_received % 10 == 0:
-                        print(f"[Session {session.session_id[:8]}] - Total received: {frames_received} frames")
-                    
-                    try:
-                        opus_reader.append_bytes(audio_data)
-                        pcm = opus_reader.read_pcm()
-                        
-                        if pcm.shape[-1] == 0:
-                            continue
-                        
-                        # Debug: Log audio ingress
-                        if frames_received % 10 == 0:
-                            print(f"[Session {session.session_id[:8]}] - Decoded PCM: {pcm.shape[-1]} samples")
-                            
-                        if all_pcm_data is None:
-                            all_pcm_data = pcm
-                        else:
-                            all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                    except Exception as e:
-                        error_msg = str(e)
-                        # If decoder dies, stop processing input
-                        if "channel" in error_msg.lower() or "closed" in error_msg.lower():
-                            print(f"[Session {session.session_id[:8]}] - Opus decoder channel error at frame {frames_received}, stopping input ({error_msg})")
-                            session.close_requested = True
-                            break
-                        else:
-                            print(f"[Session {session.session_id[:8]}] - Opus decode error: {e}")
+                    if frames_received % 20 == 0:
+                        print(f"[Session {session.session_id[:8]}] - Received {frames_received} PCM frames")
+
+                    # audio_data is expected to be a 1D float32 ndarray
+                    # already at self._mimi.sample_rate.
+                    pcm = audio_data
+                    if pcm is None or pcm.size == 0:
+                        continue
+
+                    if all_pcm_data is None:
+                        all_pcm_data = pcm
+                    else:
+                        all_pcm_data = np.concatenate((all_pcm_data, pcm))
                         
             async def process_audio_loop():
                 """Main audio processing loop - encode/generate/decode."""
