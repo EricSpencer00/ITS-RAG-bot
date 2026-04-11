@@ -1,138 +1,123 @@
 # ITS Voice Bot
 
-Voice-first RAG chatbot for Loyola ITS support.
+Voice-first RAG chatbot for Loyola ITS support, with an optional full-duplex
+voice mode powered by NVIDIA PersonaPlex.
+
+## Requirements
+
+- **Python 3.11** — required. Python 3.13+ will fail because `moshi-personaplex`
+  pins `torch<2.5`, and torch only ships 3.13+ wheels from 2.5 onward. There is
+  no workaround; use 3.11.
 
 ## Setup
 
 ```bash
-# 1. Create virtual environment
-python3 -m venv .venv311
-source .venv311/bin/activate
+# 1. Create a Python 3.11 virtual environment
+python3.11 -m venv .venv311
+source .venv311/bin/activate   # Windows: .venv311\Scripts\activate
 
-# 2. Install dependencies
-#
-# The repo maintains two sets of requirements:
-#   * requirements.txt      – minimal set used for lightweight/demo
-#    deployments (Heroku slug friendly).
-#   * requirements-full.txt – full set including ML/RAG/LLM libs for
-#    local development or if running everything on the same host.
-#
-# To install the full set, run `pip install -r requirements-full.txt`.
+# 2. Install all dependencies (single unified requirements file)
 pip install -r requirements.txt
+#
+# This installs the full stack: web framework, Whisper STT, Edge TTS,
+# RAG (FAISS + sentence-transformers), and the vendored NVIDIA
+# PersonaPlex / Moshi fork for full-duplex voice.
+#
+# pip will downgrade sphn and huggingface-hub from any newer versions —
+# that is expected and required for PersonaPlex to load correctly.
 
-
-# 3. Download Vosk model
-mkdir -p models
-cd models
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-cd ..
-
-# 4. Start Ollama (in separate terminal)
-ollama serve
-ollama pull llama3.2
-
-# 5. Ingest documents (first time only)
+# 3. Ingest documents (first time only)
 python scripts/ingest_docs.py
 
-# 6. Run server
-python scripts/run_dev.py
-```
+# 4. (Optional) Start Ollama for local LLM inference
+ollama serve
+ollama pull llama3.1:8b
 
-## Usage
+# 5. Run the server
+uvicorn app.main:app --reload
+```
 
 Open http://127.0.0.1:8000 in your browser.
 
-- **Voice**: Click mic button, speak, click again to stop
+## Usage
+
 - **Text**: Type in the input box and press Enter
-- **Voice Output**: Toggle the speaker icon to enable/disable TTS
+- **Voice (cascaded)**: Click the mic button, speak, click again to stop.
+  Uses faster-whisper STT → LLM → Edge TTS.
+- **Voice (PersonaPlex)**: Select "PersonaPlex (local, full-duplex)" from the
+  Engine dropdown. On first connect the server downloads `nvidia/personaplex-7b-v1`
+  (~15 GB) and warms up the model — this takes several minutes. Once ready the
+  mic streams directly into the speech-to-speech model with no separate STT/TTS
+  step.
+- **Audio output**: Toggle the speaker icon to enable/disable TTS playback.
+- **LLM model**: Switch between remote HuggingFace models or local Ollama from
+  the model dropdown.
 
----
+## Voice Engines
 
-## Deployment 📦
+| Engine | How it works | Best for |
+|--------|-------------|----------|
+| Cascaded (default) | Browser mic → Whisper STT → LLM → Edge TTS | Any machine, no GPU needed |
+| PersonaPlex | Full-duplex speech-to-speech 7B model | Best conversational quality; needs GPU / Apple Silicon MPS |
 
-The app is container‑friendly. two primary paths to the internet:
+The device is auto-detected (CUDA → MPS → CPU). To force a device set
+`PERSONAPLEX_DEVICE=cpu` in your `.env`.
 
-1. **Heroku (containers)**
-   ```bash
-   # login and create app
-   heroku login
-   heroku create my-its-voice-bot
+## Configuration
 
-   # set any env vars you need, e.g.:
-   heroku config:set HF_CHAT_MODEL="gpt2" HF_TOKEN="$(cat ~/.hf_token)"
-   heroku config:set OLLAMA_BASE_URL="http://somehost:11434" \
-        OLLAMA_MODEL="llama3.1:8b"
-
-   # push container
-   heroku container:push web --app my-its-voice-bot
-   heroku container:release web --app my-its-voice-bot
-
-   # view logs
-   heroku logs --tail --app my-its-voice-bot
-   ```
-   The `heroku.yml` in the repo makes this a straight Docker build; the
-   included `Dockerfile` installs dependencies and runs `uvicorn` on
-   `$PORT`.
-
-2. **Any other host** – you can use the same Dockerfile or run `uvicorn`
-   directly on a VM.  Make sure to copy the `models/vosk*` directory and
-   `data/faiss/faiss.index` (or re-run `scripts/ingest_docs.py`).  Set
-   environment variables for `HF_CHAT_MODEL`/`HF_TOKEN` (to call public
-   HuggingFace inference) or `OLLAMA_BASE_URL`/`OLLAMA_MODEL` if using a
-   local Ollama server.
-
-### HuggingFace inference and remote STT
-
-The demo can talk to free HuggingFace endpoints rather than running models
-locally.  Set the following config vars on Heroku (or in your `.env`):
+Copy `.env.example` to `.env` and set values as needed:
 
 ```bash
-heroku config:set HF_CHAT_MODEL="tiiuae/zephyr-7b-instruct" \
-                  HF_TOKEN="<your-hf-token>"
-# note: many of the earlier free endpoints (falcon‑7b‑instruct, mistralai/7B,
-# even the 7B‑Instruct-v0.2 release) now return HTTP 410.  `tiiuae/zephyr-7b-
-# instruct` is a working fall‑back that is free to use; feel free to swap in
-# another model of your choice.
-# optional custom HF URL, e.g. for a self‑hosted API
-# by default the code uses the new `router.huggingface.co` service
-# heroku config:set HF_API_URL="https://my-hf-host/models"
+# LLM — HuggingFace (remote, free tier)
+HF_CHAT_MODEL=tiiuae/zephyr-7b-instruct
+HF_TOKEN=<your-hf-token>
+
+# LLM — local Ollama (fallback if HF_CHAT_MODEL unset)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b
+
+# STT — leave empty for local faster-whisper, or set "openai" for OpenAI Whisper API
+STT_API=
+OPENAI_API_KEY=<your-openai-key>   # only needed if STT_API=openai
+
+# PersonaPlex
+PERSONAPLEX_DEVICE=          # auto (cuda > mps > cpu); set to force
+PERSONAPLEX_ENABLED=true
+HF_REPO=nvidia/personaplex-7b-v1
+DEFAULT_VOICE_PROMPT=NATF2
 ```
 
-With these variables present the bot uses `_hf_chat()` in
-`app/conversation/controller.py` to send prompts and receive completions.
-If `HF_CHAT_MODEL` is unset the code falls back to your local Ollama server.
+## Deployment
 
-#### Remote STT
+The app is container-friendly. Two primary paths:
 
-You can also perform speech‑to‑text via an external service instead of
-`faster-whisper`.  Use the `STT_API` var to choose the provider:
+### Heroku (containers)
 
-* `STT_API=hf` – call HuggingFace’s speech‑to‑text endpoint.  The
-  specific model can be overridden with `HF_STT_MODEL` (default
-  `openai/whisper-1`).  However, **as of early 2026 there are no free HF
-  providers hosting any ASR models via the router**, so every attempt
-  will fail with a 404/StopIteration error unless you host your own
-  inference service or get special access to a gated model.  The code
-  uses the official `huggingface_hub.InferenceClient` SDK; when remote
-  STT fails it now surfaces a friendly message and suggests using a
-  local model or switching to `STT_API=openai`.
-  
-  Suggested “safe picks” such as `openai/whisper-small`,
-  `openai/whisper-base` or `openai/whisper-tiny` are **all in the same
-  boat** – we tried them and the router immediately raised
-  `StopIteration` (meaning no provider responded).  There’s nothing you
-  can do in the client to make those start working until a vendor turns
-  them on.
-* `STT_API=openai` – call OpenAI’s Whisper API (`OPENAI_API_KEY` must be set).
+```bash
+heroku login
+heroku create my-its-voice-bot
 
-No additional Python packages are required; the `RemoteSTT` helper lives in
-`app/voice/remote_stt.py` and is selected automatically when `STT_API` is
-nonempty.
+heroku config:set HF_CHAT_MODEL="tiiuae/zephyr-7b-instruct" \
+                  HF_TOKEN="<your-hf-token>"
 
-Leave `STT_API` unset to attempt loading the local Whisper model (which will
-fail gracefully on a minimal slug).
+heroku container:push web --app my-its-voice-bot
+heroku container:release web --app my-its-voice-bot
+heroku logs --tail --app my-its-voice-bot
+```
 
-This configuration lets you deploy a fully functional demo on Heroku using
-only free-tier cloud APIs.  The dyno remains small (< 60 MB) because none of
-`torch`/`faiss`/`faster-whisper` is installed.
+The included `heroku.yml` and `Dockerfile` handle the build. PersonaPlex is not
+suitable for Heroku (no GPU, 30-second request timeout) — set
+`PERSONAPLEX_ENABLED=false` for cloud deployments.
+
+### Any other host
+
+Use the same Dockerfile or run `uvicorn` directly on a VM with Python 3.11.
+Copy `data/faiss/faiss.index` (or re-run `scripts/ingest_docs.py`). Set env
+vars for your LLM backend.
+
+### Remote STT note
+
+`STT_API=hf` (HuggingFace ASR) is non-functional as of early 2026 — no free
+providers serve ASR models via the HF router. Use `STT_API=openai` with an
+OpenAI key, or leave it unset to use local faster-whisper (recommended for
+best accuracy).
