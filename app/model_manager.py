@@ -38,7 +38,7 @@ RECOMMENDED_MODELS = {
         "quality": "Very capable",
     },
     "zephyr-7b": {
-        "repo": "tiiuae/zephyr-7b-instruct",
+        "repo": "HuggingFaceH4/zephyr-7b-beta",
         "size": "7B",
         "speed": "🔥 Medium",
         "quality": "Great for chat",

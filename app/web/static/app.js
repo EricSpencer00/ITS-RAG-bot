@@ -126,6 +126,21 @@ function initSpeechRecognition() {
 }
 
 function toggleListening() {
+    if (currentEngine === "personaplex") {
+        // PersonaPlex uses full-duplex capture over its own WebSocket,
+        // not the Web Speech API. Toggle the MediaRecorder pipeline instead.
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert("PersonaPlex is still loading. Please wait for the status to read 'Ready'.");
+            return;
+        }
+        if (ppRecorder) {
+            stopPersonaPlexCapture();
+        } else {
+            startPersonaPlexCapture();
+        }
+        return;
+    }
+
     if (!recognition) {
         alert("Speech recognition not supported. Try Chrome or Edge.");
         return;
@@ -410,6 +425,7 @@ function connectWebSocket() {
             ws.send(JSON.stringify({ type: "config", audio_enabled: audioToggle.checked }));
         } else {
             connectionStatus.textContent = "Loading PersonaPlex…";
+            micBtn.disabled = true; // re-enabled when server sends status:ready
         }
     };
 
@@ -451,9 +467,14 @@ function connectWebSocket() {
                 playAudio(msg.data);
                 break;
             case "status":
-                if (msg.message === "ready" && currentEngine === "personaplex") {
-                    connectionStatus.textContent = "Ready · PersonaPlex";
-                    startPersonaPlexCapture();
+                if (currentEngine === "personaplex") {
+                    if (msg.message === "loading") {
+                        connectionStatus.textContent = "Loading PersonaPlex…";
+                        micBtn.disabled = true;
+                    } else if (msg.message === "ready") {
+                        connectionStatus.textContent = "Ready · PersonaPlex (tap mic to talk)";
+                        micBtn.disabled = false;
+                    }
                 }
                 break;
             case "barge_in":
@@ -492,12 +513,25 @@ async function startPersonaPlexCapture() {
             const b64 = btoa(bin);
             ws.send(JSON.stringify({ type: "audio", data: b64 }));
         };
+        ppRecorder.onstop = () => {
+            isListening = false;
+            micBtn.classList.remove("recording");
+            recordingOverlay.classList.remove("active");
+            updateStatus();
+        };
         ppRecorder.start(100); // 100ms chunks
+        isListening = true;
         micBtn.classList.add("recording");
+        recordingOverlay.classList.add("active");
         recordingText.textContent = "PersonaPlex listening…";
+        updateStatus();
     } catch (e) {
         console.error("PersonaPlex capture error:", e);
         createMessage("assistant", "Error: mic access failed for PersonaPlex — " + e.message);
+        isListening = false;
+        micBtn.classList.remove("recording");
+        recordingOverlay.classList.remove("active");
+        updateStatus();
     }
 }
 
@@ -510,7 +544,13 @@ function stopPersonaPlexCapture() {
         ppStream.getTracks().forEach(t => t.stop());
         ppStream = null;
     }
+    if (ws && ws.readyState === WebSocket.OPEN && currentEngine === "personaplex") {
+        try { ws.send(JSON.stringify({ type: "stop" })); } catch (_) {}
+    }
+    isListening = false;
     micBtn.classList.remove("recording");
+    recordingOverlay.classList.remove("active");
+    updateStatus();
 }
 
 // ── Events ───────────────────────────────────────────────────────────
@@ -535,7 +575,13 @@ textInput.addEventListener("keydown", (e) => {
 });
 
 micBtn.addEventListener("click", toggleListening);
-recordingStop.addEventListener("click", () => { if (recognition && isListening) recognition.stop(); });
+recordingStop.addEventListener("click", () => {
+    if (currentEngine === "personaplex") {
+        stopPersonaPlexCapture();
+    } else if (recognition && isListening) {
+        recognition.stop();
+    }
+});
 
 audioToggle.addEventListener("change", () => {
     if (ws && ws.readyState === WebSocket.OPEN) {

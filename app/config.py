@@ -48,7 +48,7 @@ DEFAULT_VOICE_PROMPT = _env("DEFAULT_VOICE_PROMPT", "NATF2")
 # been retired (HTTP 410).  The default now points to Zephyr which is actively
 # maintained and works on the free tier.  You can override with any other
 # instruction‑capable HF model if desired.
-HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "tiiuae/zephyr-7b-instruct")
+HF_CHAT_MODEL = _env("HF_CHAT_MODEL", "HuggingFaceH4/zephyr-7b-beta")
 
 # remote STT configuration
 STT_API = _env("STT_API", "")  # "hf" or "openai" or empty for local

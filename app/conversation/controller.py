@@ -181,7 +181,16 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
     model_manager = get_model_manager()
     model = model_manager.get_current_model()
 
-    client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else InferenceClient()
+    # The legacy `api-inference.huggingface.co` endpoint was retired
+    # (returns HTTP 410 Gone) in early 2026. Route through the new
+    # `router.huggingface.co` service by pinning provider="hf-inference".
+    # Fall back to the default client if the installed huggingface_hub
+    # version is too old to support the provider kwarg.
+    client_kwargs = {"token": HF_TOKEN} if HF_TOKEN else {}
+    try:
+        client = InferenceClient(provider="hf-inference", **client_kwargs)
+    except TypeError:
+        client = InferenceClient(**client_kwargs)
 
     # Try chat_completion first (newer, better structured)
     try:
@@ -204,7 +213,12 @@ def _hf_chat(messages: List[Dict[str, str]]) -> str:
         chat_error = str(e).lower()
         print(f"[HF Chat] chat_completion failed: {e}")
 
-        # If chat fails, try text_generation with formatted prompt
+        # HTTP 410 Gone (legacy endpoint retirement) or missing repo → hopeless,
+        # skip text_generation retry and let the caller fall back to Ollama.
+        if "410" in chat_error or "gone" in chat_error or "not found" in chat_error or "404" in chat_error:
+            raise RuntimeError(f"HF inference endpoint unavailable for '{model}' ({str(e)[:120]})") from e
+
+        # If chat fails for a 'not supported' reason, try text_generation
         if "not supported" not in chat_error and "supported task" not in chat_error:
             print(f"[HF Chat] Not a 'not supported' error, re-raising")
             raise
