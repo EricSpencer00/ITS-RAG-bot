@@ -6,21 +6,30 @@ Cascaded voice pipeline:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
 import uuid
 
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import STT_SILENCE_CHUNKS, TTS_CHUNK_MIN_CHARS, STT_API
+from app.config import (
+    STT_SILENCE_CHUNKS,
+    TTS_CHUNK_MIN_CHARS,
+    STT_API,
+    PERSONAPLEX_ENABLED,
+    DEFAULT_VOICE_PROMPT,
+    DEFAULT_TEXT_PROMPT,
+)
 from app.conversation.controller import handle_user_text_stream, handle_user_text
 from app.conversation.state import ConversationState
 from app.rag.retriever import Retriever
+from app.rag.prompt import SYSTEM_PROMPT
 
 # STT classes; remote_stt imported lazily if required
 from app.voice.stt_whisper import WhisperSTT
@@ -108,6 +117,29 @@ async def get_models():
         "personaplex_available": model_manager.is_personaplex_available(),
         "initialization_in_progress": model_manager.is_initialization_in_progress(),
     }
+
+
+@app.get("/api/voice/engines")
+async def list_voice_engines():
+    """List voice pipeline options available to the UI."""
+    engines = [
+        {
+            "id": "cascaded",
+            "label": "Cascaded (Whisper + LLM + Edge TTS)",
+            "description": "Browser mic → STT → LLM → TTS. Works anywhere.",
+            "ws": "/ws/audio",
+            "available": True,
+        },
+    ]
+    if PERSONAPLEX_ENABLED:
+        engines.append({
+            "id": "personaplex",
+            "label": "PersonaPlex (local, full-duplex)",
+            "description": "Speech-to-speech 7B model. Requires GPU for real-time; first load downloads ~15GB.",
+            "ws": "/ws/personaplex",
+            "available": True,
+        })
+    return {"engines": engines, "default": "cascaded"}
 
 
 @app.post("/api/models/select")
@@ -338,4 +370,124 @@ async def ws_audio(websocket: WebSocket) -> None:
         print(f"[WS] Session {session_id[:8]} disconnected")
     except Exception as e:
         print(f"[WS] Session {session_id[:8]} error: {e}")
+
+
+# ── PersonaPlex full-duplex voice endpoint ─────────────────────────────
+
+
+@app.websocket("/ws/personaplex")
+async def ws_personaplex(websocket: WebSocket) -> None:
+    """Full-duplex speech-to-speech via NVIDIA PersonaPlex.
+
+    Protocol (JSON-over-WebSocket):
+      Client → server:
+        {"type": "audio", "data": "<base64 opus chunk>"}
+        {"type": "stop"}
+      Server → client:
+        {"type": "status", "message": "loading" | "ready"}
+        {"type": "audio", "data": "<base64 wav>", "format": "wav"}
+        {"type": "token", "content": "<text>"}
+        {"type": "error", "message": "..."}
+    """
+    await websocket.accept()
+    session_id = str(uuid.uuid4())
+
+    if not PERSONAPLEX_ENABLED:
+        await websocket.send_json({"type": "error", "message": "PersonaPlex is disabled on this server."})
+        await websocket.close()
+        return
+
+    # Lazy import — keeps startup cheap and surfaces missing deps cleanly
+    try:
+        from app.voice.personaplex import get_engine, PersonaPlexSession
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "message": f"PersonaPlex module unavailable: {e}. Check sphn / moshi / huggingface-hub versions.",
+        })
+        await websocket.close()
+        return
+
+    await websocket.send_json({"type": "status", "message": "loading"})
+
+    try:
+        engine = await get_engine()
+    except Exception as e:
+        await websocket.send_json({"type": "error", "message": f"PersonaPlex init failed: {e}"})
+        await websocket.close()
+        return
+
+    await websocket.send_json({"type": "status", "message": "ready"})
+
+    session = PersonaPlexSession(
+        session_id=session_id,
+        voice_prompt=DEFAULT_VOICE_PROMPT,
+        text_prompt=SYSTEM_PROMPT or DEFAULT_TEXT_PROMPT,
+    )
+
+    incoming: asyncio.Queue = asyncio.Queue()
+    alive = True
+
+    async def is_alive() -> bool:
+        return alive
+
+    async def receive_audio() -> Optional[bytes]:
+        try:
+            return await asyncio.wait_for(incoming.get(), timeout=0.1)
+        except asyncio.TimeoutError:
+            return None
+
+    async def send_audio(wav_bytes: bytes) -> None:
+        await websocket.send_json({
+            "type": "audio",
+            "data": base64.b64encode(wav_bytes).decode("ascii"),
+            "format": "wav",
+        })
+
+    async def send_text(text: str) -> None:
+        await websocket.send_json({"type": "token", "content": text})
+
+    async def read_loop() -> None:
+        nonlocal alive
+        try:
+            while alive:
+                msg = await websocket.receive_text()
+                payload = json.loads(msg)
+                mtype = payload.get("type")
+                if mtype == "audio":
+                    data = payload.get("data", "")
+                    if data:
+                        await incoming.put(base64.b64decode(data))
+                elif mtype == "stop":
+                    alive = False
+                    break
+        except WebSocketDisconnect:
+            alive = False
+        except Exception as e:
+            print(f"[WS/personaplex {session_id[:8]}] read error: {e}")
+            alive = False
+
+    read_task = asyncio.create_task(read_loop())
+    try:
+        await engine.handle_conversation(
+            session=session,
+            send_audio=send_audio,
+            send_text=send_text,
+            receive_audio=receive_audio,
+            is_alive=is_alive,
+        )
+    except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+        print(f"[WS/personaplex {session_id[:8]}] error: {e}")
+    finally:
+        alive = False
+        read_task.cancel()
+        try:
+            await read_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        print(f"[WS/personaplex {session_id[:8]}] closed")
 

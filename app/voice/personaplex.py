@@ -48,11 +48,16 @@ def seed_all(seed: int) -> None:
 
 
 def torch_auto_device(requested: Optional[DeviceString] = None) -> torch.device:
-    """Return a torch.device based on the requested string or availability."""
-    if requested is not None:
+    """Return a torch.device based on the requested string or availability.
+
+    Empty string or None → auto-detect (cuda > mps > cpu).
+    """
+    if requested:
         return torch.device(requested)
     if torch.cuda.is_available():
         return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
     return torch.device("cpu")
 
 

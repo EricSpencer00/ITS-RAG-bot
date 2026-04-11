@@ -7,6 +7,7 @@ const connectionStatus = document.getElementById("connection-status");
 const connectionDot = document.getElementById("connection-dot");
 const audioToggle = document.getElementById("audioToggle");
 const modelSelect = document.getElementById("modelSelect");
+const engineSelect = document.getElementById("engineSelect");
 const micBtn = document.getElementById("micBtn");
 const welcomeEl = document.getElementById("welcome");
 const recordingOverlay = document.getElementById("recording-overlay");
@@ -14,6 +15,9 @@ const recordingText = document.getElementById("recording-text");
 const recordingStop = document.getElementById("recording-stop");
 
 let ws = null;
+let currentEngine = "cascaded"; // "cascaded" | "personaplex"
+let ppRecorder = null;
+let ppStream = null;
 let isListening = false;
 let isSpeaking = false;
 let currentAudio = null;
@@ -384,18 +388,34 @@ function playAudio(b64) {
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────
+function wsPath() {
+    return currentEngine === "personaplex" ? "/ws/personaplex" : "/ws/audio";
+}
+
 function connectWebSocket() {
+    // Close any existing socket before opening a new one
+    if (ws) {
+        try { ws.onclose = null; ws.close(); } catch (_) {}
+        ws = null;
+    }
+    stopPersonaPlexCapture();
+
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws/audio`);
+    ws = new WebSocket(`${proto}://${location.host}${wsPath()}`);
 
     ws.onopen = () => {
         setConnection(true);
         updateModelDisplay();
-        ws.send(JSON.stringify({ type: "config", audio_enabled: audioToggle.checked }));
+        if (currentEngine === "cascaded") {
+            ws.send(JSON.stringify({ type: "config", audio_enabled: audioToggle.checked }));
+        } else {
+            connectionStatus.textContent = "Loading PersonaPlex…";
+        }
     };
 
     ws.onclose = () => {
         setConnection(false);
+        stopPersonaPlexCapture();
         if (isListening && recognition) recognition.stop();
         setTimeout(connectWebSocket, 3000);
     };
@@ -426,6 +446,16 @@ function connectWebSocket() {
             case "tts":
                 playAudio(msg.audio);
                 break;
+            case "audio":
+                // PersonaPlex streams WAV chunks under type:"audio"
+                playAudio(msg.data);
+                break;
+            case "status":
+                if (msg.message === "ready" && currentEngine === "personaplex") {
+                    connectionStatus.textContent = "Ready · PersonaPlex";
+                    startPersonaPlexCapture();
+                }
+                break;
             case "barge_in":
                 stopPlayback();
                 break;
@@ -441,6 +471,46 @@ function connectWebSocket() {
                 break;
         }
     };
+}
+
+// ── PersonaPlex full-duplex mic capture ──────────────────────────────
+async function startPersonaPlexCapture() {
+    if (ppRecorder) return;
+    try {
+        ppStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+            ? "audio/webm;codecs=opus"
+            : "audio/ogg;codecs=opus";
+        ppRecorder = new MediaRecorder(ppStream, { mimeType: mime });
+        ppRecorder.ondataavailable = async (ev) => {
+            if (!ev.data || ev.data.size === 0) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const buf = await ev.data.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let bin = "";
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            const b64 = btoa(bin);
+            ws.send(JSON.stringify({ type: "audio", data: b64 }));
+        };
+        ppRecorder.start(100); // 100ms chunks
+        micBtn.classList.add("recording");
+        recordingText.textContent = "PersonaPlex listening…";
+    } catch (e) {
+        console.error("PersonaPlex capture error:", e);
+        createMessage("assistant", "Error: mic access failed for PersonaPlex — " + e.message);
+    }
+}
+
+function stopPersonaPlexCapture() {
+    if (ppRecorder) {
+        try { ppRecorder.stop(); } catch (_) {}
+        ppRecorder = null;
+    }
+    if (ppStream) {
+        ppStream.getTracks().forEach(t => t.stop());
+        ppStream = null;
+    }
+    micBtn.classList.remove("recording");
 }
 
 // ── Events ───────────────────────────────────────────────────────────
@@ -472,6 +542,16 @@ audioToggle.addEventListener("change", () => {
         ws.send(JSON.stringify({ type: "config", audio_enabled: audioToggle.checked }));
     }
     if (!audioToggle.checked) stopPlayback();
+});
+
+engineSelect.addEventListener("change", () => {
+    currentEngine = engineSelect.value;
+    if (currentEngine === "personaplex") {
+        createMessage("assistant", "Switching to PersonaPlex (local, full-duplex). First load may download ~15GB and take several minutes.");
+    } else {
+        createMessage("assistant", "Switched to cascaded voice pipeline.");
+    }
+    connectWebSocket();
 });
 
 modelSelect.addEventListener("change", async () => {

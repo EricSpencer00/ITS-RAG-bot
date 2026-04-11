@@ -64,9 +64,12 @@ HF_TOKEN = _env("HF_TOKEN", "")
 
 # PersonaPlex voice model configuration
 HF_REPO = _env("HF_REPO", "nvidia/personaplex-7b-v1")  # repo containing voice model artifacts
-PERSONAPLEX_DEVICE = _env("PERSONAPLEX_DEVICE", "cuda")
+# empty string → auto-detect (cuda > mps > cpu). Set to "cuda"/"cpu"/"mps" to force.
+PERSONAPLEX_DEVICE = _env("PERSONAPLEX_DEVICE", "")
 # set to "true" to enable cpu offloading when GPU memory is limited
 PERSONAPLEX_CPU_OFFLOAD = _env("PERSONAPLEX_CPU_OFFLOAD", "false").lower() in ("1","true","yes")
+# feature flag: expose PersonaPlex as a selectable voice engine in the UI
+PERSONAPLEX_ENABLED = _env("PERSONAPLEX_ENABLED", "true").lower() in ("1","true","yes")
 
 # (optional) directory path containing pre‑downloaded PersonaPlex voice prompts
 VOICE_PROMPT_DIR = _env("VOICE_PROMPT_DIR", "")

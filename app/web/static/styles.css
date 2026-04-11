@@ -101,7 +101,8 @@ header {
     border-color: rgba(255,255,255,0.2);
 }
 
-.model-pill select {
+.model-pill select,
+.engine-pill select {
     background: transparent;
     color: rgba(255,255,255,0.9);
     border: none;
@@ -112,12 +113,14 @@ header {
     padding-right: 0.25rem;
 }
 
-.model-pill select option {
+.model-pill select,
+.engine-pill select option {
     background: var(--maroon-dark);
     color: white;
 }
 
-.model-pill select optgroup {
+.model-pill select,
+.engine-pill select optgroup {
     color: rgba(255,255,255,0.6);
     font-style: normal;
     font-weight: 600;
@@ -685,7 +688,8 @@ main {
         font-size: 0.7rem;
     }
 
-    .model-pill select { font-size: 0.7rem; }
+    .model-pill select,
+.engine-pill select { font-size: 0.7rem; }
 
     #chat-container { max-width: 100%; }
 

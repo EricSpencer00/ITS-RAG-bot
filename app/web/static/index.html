@@ -26,6 +26,12 @@
             </div>
         </div>
         <div class="header-right">
+            <div class="header-pill engine-pill">
+                <select id="engineSelect" title="Voice pipeline">
+                    <option value="cascaded" selected>Cascaded (STT→LLM→TTS)</option>
+                    <option value="personaplex">PersonaPlex (local, full-duplex)</option>
+                </select>
+            </div>
             <div class="header-pill model-pill">
                 <select id="modelSelect" title="Switch LLM model">
                     <optgroup label="Remote (HuggingFace)">
