@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LUC ITS Assistant</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=20260410c">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -130,6 +130,9 @@
         </div>
     </main>
 
-    <script src="/static/app.js"></script>
+    <!-- Bump the ?v= query each time app.js / styles.css change so the
+         browser cannot serve a stale build. The browser keys on the URL,
+         so changing the query forces a fresh fetch. -->
+    <script src="/static/app.js?v=20260410c"></script>
 </body>
 </html>

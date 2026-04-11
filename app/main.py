@@ -8,9 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import faulthandler
 import json
+import os
 import re
+import sys
 import uuid
+
+# Dump a Python stack trace on SIGSEGV / SIGABRT / SIGFPE / SIGBUS so that
+# native crashes inside torch / moshi / sphn (PersonaPlex backend) leave
+# something more useful than "EXC_BAD_ACCESS at 0x580" in the log.
+faulthandler.enable(file=sys.stderr, all_threads=True)
 
 from typing import Dict, Optional
 
@@ -44,6 +52,46 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 _stt: WhisperSTT | None = None
 # if faster-whisper isn't installed (minimal slug), get_stt will return None
 _retriever: Retriever | None = None
+
+
+def _personaplex_supported() -> tuple[bool, str]:
+    """Decide whether PersonaPlex can plausibly run on this host.
+
+    Returns (supported, reason). PP segfaults on this user's M1 in two
+    distinct ways depending on device: MPS crashes inside moshi's native
+    codec, and CPU crashes inside torch ops *only when* faster-whisper has
+    already been loaded in the same process (the OpenMP runtimes from
+    libtorch and CTranslate2 conflict on macOS). Either path takes the
+    whole uvicorn worker down before any error message reaches the UI.
+    Until we either run PP in a subprocess or find a CUDA box, gate the
+    feature behind an explicit support check so the user gets a clear
+    error in the chat instead of a crash report.
+    """
+    if not PERSONAPLEX_ENABLED:
+        return False, "PersonaPlex is disabled via PERSONAPLEX_ENABLED=false."
+    try:
+        import torch  # noqa: WPS433
+    except Exception as exc:  # pragma: no cover - torch should always be present
+        return False, f"PyTorch is not importable: {exc}"
+    if torch.cuda.is_available():
+        return True, ""
+    # No CUDA. macOS + CPU is known to segfault in this codebase.
+    if sys.platform == "darwin":
+        return False, (
+            "PersonaPlex requires a CUDA GPU. On Apple Silicon the moshi "
+            "backend either segfaults on MPS or conflicts with the OpenMP "
+            "runtime that faster-whisper loads, taking the server down. "
+            "Use the Cascaded pipeline instead."
+        )
+    # Linux/CPU might work but real-time inference is impractical with a
+    # 7B speech LM. Allow it but make the operator opt in.
+    if os.environ.get("PERSONAPLEX_ALLOW_CPU", "").lower() not in ("1", "true", "yes"):
+        return False, (
+            "PersonaPlex is gated off on non-CUDA hosts because the 7B speech "
+            "LM is not real-time on CPU. Set PERSONAPLEX_ALLOW_CPU=1 to "
+            "force-enable it for offline experimentation."
+        )
+    return True, ""
 
 
 def get_stt():
@@ -132,12 +180,14 @@ async def list_voice_engines():
         },
     ]
     if PERSONAPLEX_ENABLED:
+        supported, reason = _personaplex_supported()
         engines.append({
             "id": "personaplex",
             "label": "PersonaPlex (local, full-duplex)",
-            "description": "Speech-to-speech 7B model. Requires GPU for real-time; first load downloads ~15GB.",
+            "description": "Speech-to-speech 7B model. Requires CUDA GPU for real-time; first load downloads ~15GB.",
             "ws": "/ws/personaplex",
-            "available": True,
+            "available": supported,
+            "unavailable_reason": reason if not supported else "",
         })
     return {"engines": engines, "default": "cascaded"}
 
@@ -392,8 +442,12 @@ async def ws_personaplex(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = str(uuid.uuid4())
 
-    if not PERSONAPLEX_ENABLED:
-        await websocket.send_json({"type": "error", "message": "PersonaPlex is disabled on this server."})
+    supported, reason = _personaplex_supported()
+    if not supported:
+        # Refuse the upgrade with an explicit, user-visible reason instead
+        # of letting the load path crash the worker process. This is the
+        # entire point of the support gate — see _personaplex_supported.
+        await websocket.send_json({"type": "error", "message": reason})
         await websocket.close()
         return
 

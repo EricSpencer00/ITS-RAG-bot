@@ -51,8 +51,21 @@ function showMessages() {
     }
 }
 
-// ── Web Speech API ───────────────────────────────────────────────────
+// ── Web Speech API (last-resort fallback only) ───────────────────────
+//
+// Web Speech API in Chromium routes to Google's cloud speech service.
+// On any network hiccup, VPN, or firewall it fires `onerror: "network"`
+// within ~100 ms — that was the silently-failing-mic bug. We now prefer
+// AudioContext + server-side Whisper, and only initialize this fallback
+// if AudioContext / getUserMedia are missing entirely.
 function initSpeechRecognition() {
+    const hasAudioContext = !!(window.AudioContext || window.webkitAudioContext);
+    const hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    if (hasAudioContext && hasGetUserMedia) {
+        // Skip Web Speech entirely. We'll use AudioContext capture.
+        return;
+    }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
         console.warn("Web Speech API not supported");
@@ -798,13 +811,56 @@ audioToggle.addEventListener("change", () => {
     if (!audioToggle.checked) stopPlayback();
 });
 
+// Cached engine descriptors fetched from /api/voice/engines on startup,
+// used to refuse the PP option client-side instead of opening a WS that
+// will just be killed (or worse, segfault the worker) when the server
+// reports PP is unsupported on this host.
+let availableEngines = {};
+
+async function fetchAvailableEngines() {
+    try {
+        const resp = await fetch("/api/voice/engines");
+        const data = await resp.json();
+        availableEngines = {};
+        (data.engines || []).forEach(e => { availableEngines[e.id] = e; });
+
+        // Disable / annotate the PP <option> if the server marked it
+        // unavailable, so the user can see *why* before clicking.
+        const ppOption = engineSelect.querySelector('option[value="personaplex"]');
+        if (ppOption) {
+            const pp = availableEngines["personaplex"];
+            if (pp && !pp.available) {
+                ppOption.disabled = true;
+                ppOption.textContent = "PersonaPlex (unavailable)";
+                ppOption.title = pp.unavailable_reason || "Not available on this host";
+            }
+        }
+    } catch (e) {
+        console.error("Failed to fetch /api/voice/engines:", e);
+    }
+}
+
 engineSelect.addEventListener("change", () => {
-    currentEngine = engineSelect.value;
-    if (currentEngine === "personaplex") {
+    const requested = engineSelect.value;
+    if (requested === "personaplex") {
+        const pp = availableEngines["personaplex"];
+        if (pp && !pp.available) {
+            // Bounce the user back to cascaded with a clear message rather
+            // than connecting and waiting for the inevitable error frame.
+            engineSelect.value = "cascaded";
+            createMessage(
+                "assistant",
+                "PersonaPlex is unavailable on this server: " +
+                (pp.unavailable_reason || "no reason given") +
+                "\n\nStaying on the cascaded voice pipeline."
+            );
+            return;
+        }
         createMessage("assistant", "Switching to PersonaPlex (local, full-duplex). First load may download ~15GB and take several minutes.");
     } else {
         createMessage("assistant", "Switched to cascaded voice pipeline.");
     }
+    currentEngine = requested;
     connectWebSocket();
 });
 
@@ -838,4 +894,5 @@ document.querySelectorAll(".chip").forEach(chip => {
 
 // ── Init ─────────────────────────────────────────────────────────────
 initSpeechRecognition();
+fetchAvailableEngines();
 connectWebSocket();

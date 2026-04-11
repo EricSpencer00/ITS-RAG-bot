@@ -50,14 +50,19 @@ def seed_all(seed: int) -> None:
 def torch_auto_device(requested: Optional[DeviceString] = None) -> torch.device:
     """Return a torch.device based on the requested string or availability.
 
-    Empty string or None → auto-detect (cuda > mps > cpu).
+    Empty string or None → auto-detect (cuda > cpu).
+
+    Note: We deliberately do NOT auto-select MPS. moshi 0.1.0 (the speech-LM
+    backend that ships with PersonaPlex) was only validated against CUDA,
+    and several of its native ops segfault on Apple Silicon's MPS backend
+    during the warmup loop — typically with `EXC_BAD_ACCESS at 0x580`
+    inside the worker thread that runs the codec. CPU is slow but stable.
+    Set `PERSONAPLEX_DEVICE=mps` explicitly if you want to opt back in.
     """
     if requested:
         return torch.device(requested)
     if torch.cuda.is_available():
         return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
     return torch.device("cpu")
 
 
@@ -113,10 +118,16 @@ class PersonaPlexLoader:
         return sentencepiece.SentencePieceProcessor(tokenizer_path)
     
     def get_voice_prompts_dir(self, voice_prompt_dir: Optional[str] = None) -> str:
-        """Get or download voice prompts directory."""
-        if voice_prompt_dir is not None:
+        """Get or download voice prompts directory.
+
+        Treat empty string the same as None — `VOICE_PROMPT_DIR` defaults to
+        `""` in config, and the previous strict `is not None` check returned
+        that empty string verbatim, which then failed the `*.pt` glob and
+        raised "No .pt files found in voice prompts directory: ".
+        """
+        if voice_prompt_dir:
             return voice_prompt_dir
-            
+
         voices_tgz = self.download_file("voices.tgz")
         voices_tgz = Path(voices_tgz)
         voices_dir = voices_tgz.parent / "voices"
@@ -185,7 +196,22 @@ class PersonaPlexEngine:
         """Load all models (call once at startup)."""
         if self._initialized:
             return
-            
+
+        # Honest hardware warning. PersonaPlex's moshi 0.1.0 backend is
+        # CUDA-first; on CPU it loads fine and won't crash, but a single
+        # forward step of the 7B speech-LM takes seconds, which is not
+        # remotely real-time. On MPS it segfaults inside the codec worker
+        # thread (see torch_auto_device above). Be loud about this so users
+        # understand why nothing seems to be happening.
+        if self.device.type == "cpu":
+            print(
+                "[PersonaPlex] WARNING: running on CPU. Initialization will "
+                "succeed but real-time audio inference is not feasible — "
+                "expect multi-second-per-frame latency. Use the cascaded "
+                "voice pipeline (STT → LLM → TTS) on non-CUDA hardware.",
+                flush=True,
+            )
+
         print("[PersonaPlex] Loading Mimi speech codec...")
         mimi_weight = self.loader.download_file(PersonaPlexLoader.MIMI_NAME)
         self._mimi = self.loader.get_mimi(mimi_weight, self.device)
